@@ -2,13 +2,15 @@ name: CI Quality Gate
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main"] 
   pull_request:
-    branches: [ main ]
+    branches: [ "main"]
+  workflow_dispatch:
 
 jobs:
-  # 任务 1: 后端依赖与安装测试 (Backend)
-  backend-check:
+  # Job 1: 后端代码质量 
+  backend-lint:
+    name: Backend Lint (Ruff)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -25,17 +27,18 @@ jobs:
         with:
           python-version-file: "backend/pyproject.toml"
 
-      - name: Install Dependencies
+      - name: Install & Run Ruff
         working-directory: ./backend
-        run: uv sync
+        run: |
+          uv tool install ruff
+          echo "Checking code formatting..."
+          ruff format --check .
+          echo "Checking code logic/syntax..."
+          ruff check .
 
-      - name: Run Basic Import Test
-        working-directory: ./backend
-        # 这是一个极简测试，验证 PyTorch 是否能成功导入，确保环境没崩
-        run: uv run python -c "import torch; print(f'Successfully installed Torch {torch.__version__}')"
-
-  # 任务 2: 前端构建检查 (Frontend)
-  frontend-check:
+  # Job 2: 前端构建检查 
+  frontend-build:
+    name: Frontend Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +57,7 @@ jobs:
           
       - name: Install Dependencies
         working-directory: ./frontend
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
         
       - name: Build Check
         working-directory: ./frontend
