@@ -7,8 +7,8 @@
 ## 2. 技术栈
 
 - **后端**: Python >=3.13, FastAPI, PyTorch (CUDA 12.9), MySQL (Docker), SQLAlchemy
-- **前端**: Vue 3, Element Plus, ECharts, Axios
-- **包管理**: uv (Python), npm (Frontend)
+- **前端**: Vue 3, Vite, TypeScript, Pinia, Vue Router
+- **包管理**: uv (Python), pnpm (Frontend)
 
 ## 3. 项目目录结构
 
@@ -26,12 +26,17 @@ backend/
 
 frontend/
 ├── src/
-│   ├── api/                   # Axios 接口封装
-│   ├── components/            # 公共组件
-│   ├── views/                 # 页面组件
-│   └── App.vue
+│   ├── __tests__/             # 单元测试
+│   ├── router/                # 路由配置
+│   ├── stores/                # Pinia 状态管理
+│   ├── App.vue
+│   └── main.ts
+├── public/
+├── index.html
 ├── package.json
-└── vite.config.js
+├── tsconfig*.json
+├── vite.config.ts
+└── vitest.config.ts
 ```
 
 **规划中的重构结构**:
@@ -81,8 +86,8 @@ docker exec -it battery-mysql mysql -uroot -proot -e \
 
 ```bash
 cd frontend
-npm install
-npm install element-plus @element-plus/icons-vue axios echarts
+pnpm install
+pnpm dev
 ```
 
 ## 5. 数据库设计
@@ -160,5 +165,5 @@ python SoH_CaseA_DeepHPM_Sum.py
 
 # 前端
 cd frontend
-npm run dev
+pnpm dev
 ```
