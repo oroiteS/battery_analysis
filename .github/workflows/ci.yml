@@ -10,7 +10,7 @@ on:
 jobs:
   # Job 1: 后端代码质量 
   backend-lint:
-    name: ⚡ Backend Lint (Ruff)
+    name: Backend Lint (Ruff)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -38,7 +38,7 @@ jobs:
 
   # Job 2: 前端构建检查 
   frontend-build:
-    name: 📦 Frontend Build
+    name: Frontend Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
