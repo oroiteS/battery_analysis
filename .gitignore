@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+.env
+*.egg-info/
+dist/
+build/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# PyTorch
+*.pth
+*.pt
+*.onnx
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+
+# Vue/Vite
+dist/
+*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files
+*.mat
+*.h5
+*.hdf5
+*.csv
+
+# Logs
+*.log
+logs/
+
+#docx文档
+*.docx
+*.xlsx
+*.pptx
+*.pdf
+*.doc
+
+# AI
+CLAUDE.md
