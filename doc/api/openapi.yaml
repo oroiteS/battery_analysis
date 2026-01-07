@@ -1,0 +1,899 @@
+openapi: 3.0.3
+info:
+  title: Battery Life Analysis Platform API
+  description: |
+    RESTful API for battery health state (SoH) and remaining useful life (RUL) prediction platform.
+    Supports Baseline, BiLSTM, and DeepHPM algorithms for battery lifecycle analysis.
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@battery-analysis.com
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Development server
+  - url: https://api.battery-analysis.com/api/v1
+    description: Production server
+
+tags:
+  - name: Authentication
+    description: User authentication and authorization
+  - name: Batteries
+    description: Battery data management
+  - name: Training Jobs
+    description: Model training operations
+  - name: Models
+    description: Trained model management
+  - name: Predictions
+    description: SoH/RUL prediction services
+  - name: System
+    description: System health and version info
+
+paths:
+  /auth/token:
+    post:
+      tags: [Authentication]
+      summary: Login and obtain access token
+      description: OAuth2 password flow authentication
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Successful authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Logout current user
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Successfully logged out
+
+  /auth/me:
+    get:
+      tags: [Authentication]
+      summary: Get current user information
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Current user details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserOut'
+
+  /batteries:
+    get:
+      tags: [Batteries]
+      summary: List all batteries
+      description: Retrieve paginated list of battery datasets
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: manufacturer
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/BatteryOut'
+
+    post:
+      tags: [Batteries]
+      summary: Upload battery data
+      description: Upload .mat file with battery cycle data
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: .mat file containing battery data
+                manufacturer:
+                  type: string
+                chemistry:
+                  type: string
+                nominal_capacity:
+                  type: number
+                  format: float
+      responses:
+        '201':
+          description: Battery created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatteryOut'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+
+  /batteries/{battery_id}:
+    get:
+      tags: [Batteries]
+      summary: Get battery details
+      parameters:
+        - $ref: '#/components/parameters/BatteryIdParam'
+      responses:
+        '200':
+          description: Battery details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatteryOut'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    patch:
+      tags: [Batteries]
+      summary: Update battery metadata
+      parameters:
+        - $ref: '#/components/parameters/BatteryIdParam'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatteryUpdate'
+      responses:
+        '200':
+          description: Battery updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatteryOut'
+
+    delete:
+      tags: [Batteries]
+      summary: Delete battery
+      parameters:
+        - $ref: '#/components/parameters/BatteryIdParam'
+      responses:
+        '204':
+          description: Battery deleted successfully
+
+  /batteries/{battery_id}/cycles:
+    get:
+      tags: [Batteries]
+      summary: Get battery cycle data
+      description: Retrieve cycle data for visualization
+      parameters:
+        - $ref: '#/components/parameters/BatteryIdParam'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: cycle_index
+          in: query
+          schema:
+            type: integer
+          description: Filter by specific cycle index
+      responses:
+        '200':
+          description: Cycle data
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/CycleDataOut'
+
+  /training-jobs:
+    get:
+      tags: [Training Jobs]
+      summary: List training jobs
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [queued, running, succeeded, failed, stopped]
+      responses:
+        '200':
+          description: Training jobs list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TrainingJobOut'
+
+    post:
+      tags: [Training Jobs]
+      summary: Start training job
+      description: Initiate asynchronous model training
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrainingJobCreate'
+      responses:
+        '201':
+          description: Training job created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingJobOut'
+
+  /training-jobs/{job_id}:
+    get:
+      tags: [Training Jobs]
+      summary: Get training job details
+      parameters:
+        - $ref: '#/components/parameters/JobIdParam'
+      responses:
+        '200':
+          description: Job details with progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingJobOut'
+
+  /training-jobs/{job_id}/stop:
+    post:
+      tags: [Training Jobs]
+      summary: Stop training job
+      parameters:
+        - $ref: '#/components/parameters/JobIdParam'
+      responses:
+        '200':
+          description: Job stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingJobOut'
+
+  /training-jobs/{job_id}/logs:
+    get:
+      tags: [Training Jobs]
+      summary: Get training logs
+      parameters:
+        - $ref: '#/components/parameters/JobIdParam'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          description: Training logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        timestamp:
+                          type: string
+                          format: date-time
+                        level:
+                          type: string
+                          enum: [INFO, WARNING, ERROR]
+                        message:
+                          type: string
+
+  /training-jobs/{job_id}/metrics:
+    get:
+      tags: [Training Jobs]
+      summary: Get training metrics
+      description: Retrieve loss curves and evaluation metrics
+      parameters:
+        - $ref: '#/components/parameters/JobIdParam'
+      responses:
+        '200':
+          description: Training metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  train_loss:
+                    type: array
+                    items:
+                      type: number
+                  val_loss:
+                    type: array
+                    items:
+                      type: number
+                  epochs:
+                    type: array
+                    items:
+                      type: integer
+
+  /training-jobs/{job_id}/ws:
+    get:
+      tags: [Training Jobs]
+      summary: WebSocket endpoint for real-time training progress
+      description: |
+        WebSocket endpoint for streaming real-time training progress updates.
+        This endpoint requires a WebSocket connection upgrade.
+        Connect using: ws://localhost:8000/api/v1/training-jobs/{job_id}/ws
+      parameters:
+        - $ref: '#/components/parameters/JobIdParam'
+      responses:
+        '101':
+          description: Switching Protocols - WebSocket connection established
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /models:
+    get:
+      tags: [Models]
+      summary: List trained models
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: algorithm
+          in: query
+          schema:
+            type: string
+            enum: [baseline, bilstm, deephpm]
+      responses:
+        '200':
+          description: Models list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ModelOut'
+
+  /models/{model_id}:
+    get:
+      tags: [Models]
+      summary: Get model details
+      parameters:
+        - $ref: '#/components/parameters/ModelIdParam'
+      responses:
+        '200':
+          description: Model metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelOut'
+
+    delete:
+      tags: [Models]
+      summary: Delete model
+      parameters:
+        - $ref: '#/components/parameters/ModelIdParam'
+      responses:
+        '204':
+          description: Model deleted
+
+  /models/{model_id}/download:
+    get:
+      tags: [Models]
+      summary: Download model file
+      description: Download trained model (.pth file)
+      parameters:
+        - $ref: '#/components/parameters/ModelIdParam'
+      responses:
+        '200':
+          description: Model file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+  /predictions:
+    post:
+      tags: [Predictions]
+      summary: Single prediction
+      description: Predict SoH/RUL for battery data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PredictionRequest'
+      responses:
+        '200':
+          description: Prediction result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictionOut'
+
+    get:
+      tags: [Predictions]
+      summary: List prediction history
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          description: Predictions list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/PredictionOut'
+
+  /predictions/batch:
+    post:
+      tags: [Predictions]
+      summary: Batch prediction
+      description: Predict for multiple batteries
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requests:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/PredictionRequest'
+      responses:
+        '200':
+          description: Batch prediction results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PredictionOut'
+
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /version:
+    get:
+      tags: [System]
+      summary: Get API version
+      responses:
+        '200':
+          description: Version information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                    example: 1.0.0
+                  build:
+                    type: string
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    BatteryIdParam:
+      name: battery_id
+      in: path
+      required: true
+      schema:
+        type: integer
+      description: Battery ID
+
+    JobIdParam:
+      name: job_id
+      in: path
+      required: true
+      schema:
+        type: integer
+      description: Training job ID
+
+    ModelIdParam:
+      name: model_id
+      in: path
+      required: true
+      schema:
+        type: integer
+      description: Model ID
+
+    PageParam:
+      name: page
+      in: query
+      schema:
+        type: integer
+        default: 1
+        minimum: 1
+      description: Page number
+
+    PageSizeParam:
+      name: page_size
+      in: query
+      schema:
+        type: integer
+        default: 20
+        minimum: 1
+        maximum: 100
+      description: Items per page
+
+  schemas:
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          example: bearer
+        expires_in:
+          type: integer
+          example: 3600
+
+    UserOut:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        created_at:
+          type: string
+          format: date-time
+
+    BatteryOut:
+      type: object
+      properties:
+        id:
+          type: integer
+        filename:
+          type: string
+        total_cycles:
+          type: integer
+        nominal_capacity:
+          type: number
+          format: float
+        manufacturer:
+          type: string
+        chemistry:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    BatteryUpdate:
+      type: object
+      properties:
+        manufacturer:
+          type: string
+        chemistry:
+          type: string
+        nominal_capacity:
+          type: number
+          format: float
+
+    CycleDataOut:
+      type: object
+      properties:
+        id:
+          type: integer
+        battery_id:
+          type: integer
+        cycle_index:
+          type: integer
+        voltage:
+          type: array
+          items:
+            type: number
+        current:
+          type: array
+          items:
+            type: number
+        temperature:
+          type: array
+          items:
+            type: number
+        soh:
+          type: number
+          format: float
+          description: State of Health
+        rul:
+          type: number
+          format: float
+          description: Remaining Useful Life
+
+    TrainingJobCreate:
+      type: object
+      required:
+        - algorithm
+        - battery_ids
+      properties:
+        algorithm:
+          type: string
+          enum: [baseline, bilstm, deephpm]
+        battery_ids:
+          type: array
+          items:
+            type: integer
+          minItems: 1
+        hyperparams:
+          type: object
+          properties:
+            epochs:
+              type: integer
+              default: 100
+            batch_size:
+              type: integer
+              default: 32
+            learning_rate:
+              type: number
+              format: float
+              default: 0.001
+        model_name:
+          type: string
+
+    TrainingJobOut:
+      type: object
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed, stopped]
+        algorithm:
+          type: string
+        progress:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Training progress (0.0 to 1.0)
+        current_epoch:
+          type: integer
+        total_epochs:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        model_id:
+          type: integer
+          description: ID of trained model (available after completion)
+
+    ModelOut:
+      type: object
+      properties:
+        id:
+          type: integer
+        algorithm:
+          type: string
+          enum: [baseline, bilstm, deephpm]
+        name:
+          type: string
+        version:
+          type: string
+        metrics:
+          type: object
+          properties:
+            train_loss:
+              type: number
+            val_loss:
+              type: number
+            test_accuracy:
+              type: number
+        created_at:
+          type: string
+          format: date-time
+        file_size:
+          type: integer
+          description: Model file size in bytes
+
+    PredictionRequest:
+      type: object
+      required:
+        - algorithm
+      properties:
+        algorithm:
+          type: string
+          enum: [baseline, bilstm, deephpm]
+        model_id:
+          type: integer
+          description: Optional, uses latest model if not specified
+        battery_id:
+          type: integer
+          description: Reference existing battery data
+        cycle_data:
+          type: object
+          description: Or provide cycle data directly
+          properties:
+            voltage:
+              type: array
+              items:
+                type: number
+            current:
+              type: array
+              items:
+                type: number
+            temperature:
+              type: array
+              items:
+                type: number
+      oneOf:
+        - required: [battery_id]
+        - required: [cycle_data]
+
+    PredictionResult:
+      type: object
+      properties:
+        soh:
+          type: number
+          format: float
+          description: Predicted State of Health
+        rul:
+          type: number
+          format: float
+          description: Predicted Remaining Useful Life
+        confidence:
+          type: number
+          format: float
+          description: Prediction confidence score
+
+    PredictionOut:
+      type: object
+      properties:
+        id:
+          type: integer
+        algorithm:
+          type: string
+        model_id:
+          type: integer
+        result:
+          $ref: '#/components/schemas/PredictionResult'
+        created_at:
+          type: string
+          format: date-time
+
+    PaginatedResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {}
+        meta:
+          type: object
+          properties:
+            page:
+              type: integer
+            page_size:
+              type: integer
+            total:
+              type: integer
+            total_pages:
+              type: integer
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: VALIDATION_ERROR
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  issue:
+                    type: string
+            trace_id:
+              type: string
+
+  responses:
+    BadRequestError:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    UnauthorizedError:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+security:
+  - BearerAuth: []
