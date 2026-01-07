@@ -7,16 +7,21 @@ from jose import JWTError, jwt
 
 from src.models import get_db, User
 from src.schemas import Token, TokenData, UserResponse
-from src.security import verify_password, create_access_token, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from src.security import (
+    verify_password,
+    create_access_token,
+    ALGORITHM,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+)
 from src.config import settings
 
 router = APIRouter()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
 
+
 async def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)],
-    db: Session = Depends(get_db)
+    token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -42,17 +47,20 @@ async def get_current_user(
         raise credentials_exception
     return user
 
+
 @router.post("/token", response_model=Token)
 async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     user = db.query(User).filter(User.email == form_data.username.lower()).first()
 
     # Timing attack mitigation: always verify password even if user doesn't exist
     if user is None:
         # Verify against dummy hash to maintain constant time
-        verify_password(form_data.password, "$2b$12$dummyhashfortimingatttackprotection")
+        verify_password(
+            form_data.password, "$2b$12$dummyhashfortimingatttackprotection"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -76,13 +84,11 @@ async def login_for_access_token(
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.email, "uid": user.id},
-        expires_delta=access_token_expires
+        data={"sub": user.email, "uid": user.id}, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
+
 @router.get("/me", response_model=UserResponse)
-async def read_users_me(
-    current_user: Annotated[User, Depends(get_current_user)]
-):
+async def read_users_me(current_user: Annotated[User, Depends(get_current_user)]):
     return current_user
