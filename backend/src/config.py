@@ -11,25 +11,28 @@ env_path = base_dir / ".env"
 # 2. 加载 .env
 load_dotenv(dotenv_path=env_path)
 
+
 class Settings:
     # 基础路径
     BASE_DIR: Path = base_dir
-    
+
     # 应用配置
     ENV: str = os.getenv("APP_ENV", "production")
     PORT: int = int(os.getenv("PORT", 8000))
     SECRET_KEY: str = os.getenv("SECRET_KEY", "default_secret_key")
-    
+
     # 数据库配置
     DB_HOST: str = os.getenv("DB_HOST", "localhost")
     DB_PORT: int = int(os.getenv("DB_PORT", 3306))
     DB_USER: str = os.getenv("DB_USER", "root")
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "root")
     DB_NAME: str = os.getenv("DB_NAME", "battery_db")
-    
+
     # 路径配置 (自动创建目录)
     UPLOAD_PATH: Path = BASE_DIR / os.getenv("UPLOAD_PATH", "storage/uploads")
-    MODEL_STORAGE_PATH: Path = BASE_DIR / os.getenv("MODEL_STORAGE_PATH", "storage/models")
+    MODEL_STORAGE_PATH: Path = BASE_DIR / os.getenv(
+        "MODEL_STORAGE_PATH", "storage/models"
+    )
 
     def __init__(self):
         # 初始化时确保目录存在
@@ -47,5 +50,6 @@ class Settings:
     def DATABASE_URL(self) -> str:
         """构造 SQLAlchemy 连接字符串"""
         return f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+
 
 settings = Settings()

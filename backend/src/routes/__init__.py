@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from src.routes import auth, batteries, training, models, predictions
+from src.routes import auth
 
 api_router = APIRouter()
 
