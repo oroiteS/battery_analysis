@@ -1,94 +1,132 @@
-from datetime import timedelta
+# src/routes/auth.py
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
 from jose import JWTError, jwt
+from passlib.context import CryptContext
+from pydantic import BaseModel, EmailStr
+from sqlalchemy.orm import Session
 
-from src.models import get_db, User
-from src.schemas import Token, TokenData, UserResponse
-from src.security import (
-    verify_password,
-    create_access_token,
-    ALGORITHM,
-    ACCESS_TOKEN_EXPIRE_MINUTES,
-)
 from src.config import settings
+from src.models import User, get_db
 
 router = APIRouter()
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
+# 密码哈希与JWT配置
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+SECRET_KEY = settings.SECRET_KEY
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24小时
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
-async def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)
+# --- Schemas ---
+class UserRegister(BaseModel):
+    user_name: str
+    email: EmailStr
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    user_name: str
+    email: str
+
+    class Config:
+        from_attributes = True
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+
+# --- Utils ---
+def get_hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def get_current_user(
+    token: Annotated[str, Depends(oauth2_scheme)],
+    db: Session = Depends(get_db),
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
+        detail="Invalid credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
-        email = payload.get("sub")
-        uid = payload.get("uid")
-        if not isinstance(email, str) or not isinstance(uid, int):
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str | None = payload.get("sub")
+        if user_id is None:
             raise credentials_exception
-        token_data = TokenData(email=email, uid=uid)
     except JWTError:
         raise credentials_exception
 
-    user = db.query(User).filter(User.id == token_data.uid).first()
+    user = db.query(User).filter(User.id == int(user_id)).first()
     if user is None:
-        raise credentials_exception
-
-    is_active: bool = user.is_active  # type: ignore[assignment]
-    if not is_active:
         raise credentials_exception
     return user
 
 
-@router.post("/token", response_model=Token)
-async def login_for_access_token(
+# --- Endpoints ---
+@router.post(
+    "/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED
+)
+def register(data: UserRegister, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == data.email).first():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
+        )
+
+    user = User(
+        user_name=data.user_name,
+        email=data.email,
+        password_hash=get_hash_password(data.password),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.post("/login", response_model=Token)
+def login(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: Session = Depends(get_db),
 ):
-    user = db.query(User).filter(User.email == form_data.username.lower()).first()
-
-    # Timing attack mitigation: always verify password even if user doesn't exist
-    if user is None:
-        # Verify against dummy hash to maintain constant time
-        verify_password(
-            form_data.password, "$2b$12$dummyhashfortimingatttackprotection"
-        )
+    user = db.query(User).filter(User.email == form_data.username).first()
+    if not user or not verify_password(form_data.password, str(user.password_hash)):
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
         )
 
-    user_password: str = user.password  # type: ignore[assignment]
-    if not verify_password(form_data.password, user_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    is_active: bool = user.is_active  # type: ignore[assignment]
-    if not is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is inactive",
-        )
-
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.email, "uid": user.id}, expires_delta=access_token_expires
+        data={"sub": str(user.id)},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
 
 @router.get("/me", response_model=UserResponse)
-async def read_users_me(current_user: Annotated[User, Depends(get_current_user)]):
+def get_me(current_user: Annotated[User, Depends(get_current_user)]):
     return current_user
+
+
+@router.post("/logout")
+def logout():
+    return {"message": "Logged out successfully"}

@@ -1,28 +1,30 @@
+# src/__init__.py
 from contextlib import asynccontextmanager
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.config import settings
 from src.routes import api_router
 from src.models import Base, engine
 
+logger = logging.getLogger("uvicorn")
+
 
 # 1. 定义 lifespan (生命周期) 管理器
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    # --- 启动逻辑 (Startup) ---
-    # 仅作为示例：在开发环境下自动创建表结构
-    # 生产环境通常推荐使用 Alembic 进行迁移
-    Base.metadata.create_all(bind=engine)
-    print(f"Server started on port {settings.PORT} in {settings.ENV} mode.")
-    print(
-        f"Database connected: {settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
+async def lifespan(_app: FastAPI):
+    # 仅在开发环境自动建表，避免生产环境启动时隐式改库
+    if settings.ENV.lower() in {"dev", "develop", "development", "local"}:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Auto create tables enabled (ENV=%s).", settings.ENV)
+    else:
+        logger.info("Skip auto create tables (ENV=%s).", settings.ENV)
+    logger.info("Server starting on port %s (ENV=%s).", settings.PORT, settings.ENV)
+    logger.info(
+        "Database: %s:%s/%s", settings.DB_HOST, settings.DB_PORT, settings.DB_NAME
     )
-
-    yield  # 应用运行期间，在此处挂起
-
-    # --- 关闭逻辑 (Shutdown) ---
-    print("Server shutting down...")
-    # 如果有数据库连接池清理工作，可以在这里执行
+    yield
+    logger.info("Server shutting down...")
 
 
 # 2. 实例化 FastAPI，并传入 lifespan 参数

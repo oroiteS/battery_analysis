@@ -1,169 +1,145 @@
-# 储能电池寿命分析及算法测试平台 - 项目规划
+# 储能电池寿命分析及算法测试平台（Project）
 
-## 1. 项目概述
+## 1. 项目背景与目标
 
-基于 B/S 架构的储能电池全生命周期数据管理与算法测试平台。集成数据可视化、深度学习算法训练（Baseline, BiLSTM, DeepHPM）、电池寿命（RUL/PCL）预测功能。
+本项目面向“储能电池寿命分析及算法测试”场景，建设一套可用于数据管理、模型训练、模型评估/预测与结果导出的 Web 平台。平台提供从电池数据查询分析、算法训练对比，到模型测试与报告导出的完整闭环能力，支撑课程综合实践与答辩展示。
 
-## 2. 技术栈
+核心目标：
 
-- **后端**: Python >=3.13, FastAPI, PyTorch (CUDA 12.9), MySQL (Docker), SQLAlchemy
-- **前端**: Vue 3, Vite, TypeScript, Pinia, Vue Router
-- **包管理**: uv (Python), pnpm (Frontend)
+- 管理并可视化展示电池全生命周期数据（内置数据集 + 用户上传数据）。
+- 提供一站式算法训练流程：数据划分、训练过程监控、指标对比、模型版本保存。
+- 提供算法测试平台：选择模型版本对指定电池/数据集进行预测评估，输出可视化与导出文件。
 
-## 3. 项目目录结构
+## 2. 需求范围（功能边界）
 
-```
-backend/
-├── main.py                    # FastAPI 入口（当前结构）
-├── power_soh/                 # 算法核心模块
-│   ├── functions.py           # 数据处理与模型定义
-│   ├── SoH_CaseA_*.py         # 训练脚本
-│   ├── Settings/              # 超参数配置
-│   ├── results/               # 训练结果
-│   └── SeversonBattery.mat    # 数据集
-├── pyproject.toml             # 依赖配置
-└── .venv/                     # 虚拟环境
+### 2.1 必做功能（MVP）
 
-frontend/
-├── src/
-│   ├── __tests__/             # 单元测试
-│   ├── router/                # 路由配置
-│   ├── stores/                # Pinia 状态管理
-│   ├── App.vue
-│   └── main.ts
-├── public/
-├── index.html
-├── package.json
-├── tsconfig*.json
-├── vite.config.ts
-└── vitest.config.ts
-```
+#### A. 用户体系（登录/注册）
 
-**规划中的重构结构**:
-```
-backend/app/
-├── algorithms/                # 算法模块（待迁移）
-├── routers/                   # API 路由
-├── core/                      # 核心配置
-├── models/                    # ORM 模型
-└── main.py
-```
+- 支持注册、登录、退出、获取当前用户信息。
+- 采用 Token（JWT）方式进行会话管理。
+- 本项目不做“用户协作/权限角色体系”，但系统需保证用户数据逻辑隔离（详见 2.2）。
 
-## 4. 环境配置
+#### B. 电池数据管理与分析
 
-### 4.1 后端环境
+- 内置数据集：数据库存储 124 组电池完整生命周期数据，包含 8 项特征（电压/电流/温度等）、循环次数（Cycle Count）、RUL、PCL。
+- 支持按电池编号筛选并进行：
+  - 统计分析：均值、方差、极值、分布等
+  - 相关性分析：特征与 RUL/PCL 相关性
+  - 趋势分析：随循环次数的衰减规律
+- 数据可视化：
+  - 折线图：特征随循环次数变化
+  - 散点图：RUL 与关键特征关系
+  - 直方图：PCL 分布
+  - 热力图：多特征相关性矩阵
 
-```bash
-cd backend
-uv sync                        # 安装依赖
-source .venv/bin/activate      # 激活环境（Linux/macOS）
-# .venv\Scripts\activate       # Windows
-```
+#### C. 算法训练平台（Training）
 
-### 4.2 数据库环境
+- 集成 3 种算法：Baseline、BiLSTM、DeepHPM。
+- “一个训练任务，多算法运行”：用户创建一次训练任务，可选择 1～3 个算法在同一任务内运行，形成统一对比与统一管理。
+- 支持基础参数配置：
+  - 用户可配置：学习率、训练轮数（可设上限）、窗口长度、特征选择、预测目标（RUL/PCL）等
+  - 系统固定：batch size 等对资源敏感的参数（避免设备不可承受）
+- 训练过程监控（前端实时展示）：
+  - 任务状态：PENDING / RUNNING / SUCCEEDED / FAILED / CANCELED
+  - 实时指标：loss、RMSPE、MSE、R² 等（按算法分别展示）
+  - 日志输出：训练日志流式展示（用于答辩演示与排查）
+- 训练结果展示：
+  - 指标对比表（多算法同屏对比）
+  - 训练/验证曲线（loss、指标曲线）
+- 模型版本管理：
+  - 每个算法运行成功后产出一个 `模型版本（Model Version）`
+  - 保存 checkpoint、配置、训练数据来源与评估指标，支持后续测试复用
 
-```bash
-# 启动 MySQL 容器
-docker run -d \
-  --name battery-mysql \
-  -p 13306:3306 \
-  -e MYSQL_ROOT_PASSWORD=root \
-  mysql:8.0
+#### D. 算法测试平台（Testing）— 完备设计
 
-# 创建数据库
-docker exec -it battery-mysql mysql -uroot -proot -e \
-  "CREATE DATABASE battery_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-```
+测试平台用于“基于已训练模型版本进行推理评估与可视化对比，并支持结果导出”。
 
-连接信息：
-- Host: localhost
-- Port: 13306
-- User: root
-- Password: root
-- Database: battery_db
+1) 测试任务创建（Test Job Create）
+- 选择模型版本（单选）：从模型库选择某个 `model_version_id`
+- 选择数据来源：
+  - 内置数据集：选择电池编号（支持单个或多个）
+  - 用户上传数据：选择某次上传记录作为测试集
+- 测试配置：
+  - 预测目标：RUL、PCL 或两者
+  - 预测设置：预测步长（horizon）
+  - 评估方式：离线批量评估（全量推理并计算总体指标 + 分电池指标）
+2) 测试任务运行与状态
+- 测试任务状态与训练任务一致：PENDING/RUNNING/SUCCEEDED/FAILED/CANCELED
+- 支持 WebSocket 推送测试进度与日志（例如：当前电池编号、已完成数量、阶段性指标等）
+3) 测试结果可视化（Test Job Detail）
+- 总体指标卡片：RMSPE、MSE、R²（按 RUL/PCL 分别展示）
+- 预测 vs 真实曲线：支持按电池编号切换查看曲线对比
+- 误差分析（建议实现至少一种）：
+  - 残差曲线（Residual over Cycle）或残差分布直方图
+- 多电池汇总对比（可选加分）：
+  - 不同电池的误差条形图/箱线图，快速定位困难样本
+4) 结果导出与报告
+- 导出格式：CSV、Excel（XLSX）
+- 导出内容建议包含：
+  - 元信息：模型版本、算法类型、测试配置、数据来源、电池编号列表
+  - 指标：总体指标 + 分电池指标
+  - 明细：每条样本的 y_true/y_pred（RUL/PCL）与时间/循环索引
+- （可选加分）生成简易报告：HTML/PDF（后续迭代项，不纳入 MVP）
 
-### 4.3 前端环境
+### 2.2 数据隔离策略（多用户数据存储）
 
-```bash
-cd frontend
-pnpm install
-pnpm dev
-```
+本项目不做复杂权限管理，但必须保证多用户数据隔离与可追溯：
 
-## 5. 数据库设计
+- 数据库层：上传记录、训练任务、测试任务、模型版本、日志与导出文件均需绑定 `user_id`。
+- 文件存储层：建议按用户维度分目录存放，便于管理与清理：
+  - 推荐结构：`data/{user_id}/uploads/{upload_id}/...`
+  - 模型结构：`data/{user_id}/models/{model_version_id}/checkpoint.pt`
+  - 测试导出：`data/{user_id}/exports/{test_job_id}/result.xlsx`
+- 展示用文件名与存储用文件名分离：存储路径使用 `upload_id/model_version_id`，原始文件名仅用于展示字段。
 
-### battery_metadata (电池元数据)
+### 2.3 暂不纳入范围
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | INT (PK) | 电池 ID |
-| group_id | INT | 组别 (Train/Test/Val) |
-| total_cycles | INT | 总循环次数 |
-| nominal_capacity | FLOAT | 标称容量 |
+- 用户协作、多角色权限、团队共享。
+- 资源保护（并发限制、配额、GPU 调度等）在本阶段不作为重点。
+- 复杂的在线实时单点交互预测（以批量评估为主）。
 
-### cycle_data (循环数据)
+## 3. 技术栈与架构说明
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | BIGINT (PK) | 自增主键 |
-| battery_id | INT (FK) | 关联电池ID |
-| cycle_index | INT | 循环圈数 |
-| voltage | FLOAT | 电压 |
-| current | FLOAT | 电流 |
-| temperature | FLOAT | 温度 |
-| pcl | FLOAT | 容量衰减百分比 |
-| rul | FLOAT | 剩余寿命 |
+### 3.1 技术栈
 
-**注**: 数据量大，建议对 battery_id 和 cycle_index 建立索引
+- 后端：FastAPI（RESTful API + WebSocket）
+- 深度学习：PyTorch
+- 数据库：MySQL（存储电池数据、用户、训练/测试记录、模型版本、指标与元数据）
+- 前端：Vue 3 + Element Plus
+- HTTP 客户端：axios
+- 任务异步化（建议）：独立 Worker 执行训练/测试任务，Web 服务负责下发任务与查询状态  
+  - 可选方案：Celery/RQ + Redis（为 Docker 部署与稳定性做准备）
 
-### training_logs (训练记录)
+### 3.2 高层架构（逻辑划分）
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | INT (PK) | 记录ID |
-| model_name | VARCHAR | 算法名称 |
-| hyperparams | JSON | 超参数 |
-| metrics | JSON | 评估指标 |
-| model_path | VARCHAR | 模型文件路径 |
-| created_at | DATETIME | 训练时间 |
+- Web 前端（Vue）：负责登录、数据分析可视化、训练与测试任务管理、结果展示与导出入口
+- API 服务（FastAPI）：
+  - 提供用户、数据、训练、测试、模型版本的 REST 接口
+  - 提供训练/测试进度 WebSocket 推送接口
+- Worker（训练/测试执行器）：
+  - 接收任务配置，执行数据预处理、训练/推理、评估、产出 artifacts
+  - 将状态、指标、日志写入数据库/文件，并通过 WebSocket 或轮询接口给前端展示
+- 存储：
+  - MySQL：结构化数据与元信息
+  - 文件系统：上传文件、模型 checkpoint、导出文件
 
-## 6. 开发实施步骤
+## 4. 核心业务流程（端到端闭环）
 
-### 阶段一：数据工程
+1) 用户注册/登录
+2) 进入数据管理：查看内置电池数据，做统计/相关性/趋势分析与可视化
+3) 上传自定义数据（可选）：形成上传记录
+4) 创建训练任务：在同一任务内选择 Baseline/BiLSTM/DeepHPM（一个或多个）并配置参数
+5) 查看训练过程：WebSocket 实时展示日志、进度与指标曲线
+6) 训练完成：每个算法产出一个模型版本（Model Version），可在模型库管理
+7) 创建测试任务：选择模型版本 + 指定电池编号/数据来源 + 预测步长，启动推理评估
+8) 查看测试结果：曲线对比、指标汇总，导出 CSV/Excel
 
-1. 配置数据库连接（SQLAlchemy）
-2. 编写数据迁移脚本，读取 .mat 文件
-3. 批量插入数据到 MySQL
+## 5. 交付物与验收要点（建议）
 
-### 阶段二：后端 API
-
-1. 封装算法训练函数
-2. 实现 RESTful API：
-   - `GET /api/batteries` - 电池列表
-   - `GET /api/batteries/{id}/cycles` - 循环数据
-   - `POST /api/train` - 启动训练
-   - `POST /api/predict` - 预测接口
-
-### 阶段三：前端开发
-
-1. 搭建布局（侧边栏导航）
-2. 集成 ECharts 图表（折线图、热力图）
-3. 实现训练交互（参数提交、进度展示）
-
-## 7. 运行命令
-
-```bash
-# 后端（当前结构）
-cd backend
-uv run uvicorn main:app --reload
-
-# 算法训练
-cd backend/power_soh
-python SoH_CaseA_Baseline.py
-python SOH_CaseA_BiLSTM.py
-python SoH_CaseA_DeepHPM_Sum.py
-
-# 前端
-cd frontend
-pnpm dev
-```
+- 可运行系统：前后端联通、登录可用
+- 数据分析页：124组电池数据可查询与可视化展示（折线/散点/直方/热力至少覆盖）
+- 训练平台：一个任务多算法训练、过程可视化、指标对比、模型版本保存
+- 测试平台：基于模型版本的预测评估、曲线对比、CSV/Excel 导出
+- API 文档：FastAPI OpenAPI/Swagger 页面可查看（加分项）
+- Docker 准备：提供 Dockerfile / docker-compose 基础框架（加分项，可后续补齐）

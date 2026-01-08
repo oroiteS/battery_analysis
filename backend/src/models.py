@@ -1,37 +1,34 @@
+# src/models.py
+from datetime import datetime, timezone
+
 from sqlalchemy import (
-    create_engine,
-    Column,
-    Integer,
+    JSON,
     BigInteger,
-    String,
+    CheckConstraint,
+    Column,
+    DateTime,
+    Enum,
     Float,
     ForeignKey,
-    DateTime,
-    JSON,
-    Enum,
-    Numeric,
-    UniqueConstraint,
     Index,
-    Boolean,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+    create_engine,
 )
-from sqlalchemy.orm import sessionmaker, declarative_base, relationship
-from datetime import datetime, timezone
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+
 from src.config import settings
 
-# --- 数据库连接核心 ---
-# 创建引擎
+# --- 数据库连接 ---
 engine = create_engine(
     settings.DATABASE_URL, pool_pre_ping=True, pool_size=10, max_overflow=20
 )
-
-# 创建 Session 工厂
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# ORM 基类
 Base = declarative_base()
 
 
-# --- 数据库依赖 ---
 def get_db():
     db = SessionLocal()
     try:
@@ -40,50 +37,131 @@ def get_db():
         db.close()
 
 
-# --- ORM 模型定义 ---
+# --- 枚举定义 ---
+SourceTypeEnum = Enum("BUILTIN", "UPLOAD", name="source_type_enum")
+GroupTagEnum = Enum("train", "val", "test", name="group_tag_enum")
+AlgorithmEnum = Enum("BASELINE", "BILSTM", "DEEPHPM", name="algorithm_enum")
+JobStatusEnum = Enum(
+    "PENDING", "RUNNING", "SUCCEEDED", "FAILED", "CANCELED", name="job_status_enum"
+)
+LogLevelEnum = Enum("DEBUG", "INFO", "WARNING", "ERROR", name="log_level_enum")
+TargetEnum = Enum("RUL", "PCL", "BOTH", name="target_enum")
+ExportFormatEnum = Enum("CSV", "XLSX", name="export_format_enum")
+UploadStatusEnum = Enum(
+    "PENDING", "PROCESSING", "SUCCEEDED", "FAILED", name="upload_status_enum"
+)
 
 
+# --- 1. 用户与认证 ---
 class User(Base):
     __tablename__ = "user"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    user_name = Column(String(50), nullable=False)
+    user_name = Column(String(50), nullable=False, unique=True)
     email = Column(String(255), nullable=False, unique=True)
-    password = Column(String(255), nullable=False)
-    path = Column(String(500), nullable=True)
-    is_active = Column(Boolean, nullable=False, default=True)
+    password_hash = Column(String(255), nullable=False)
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
 
+    uploads = relationship("DataUpload", back_populates="user")
+    datasets = relationship("Dataset", back_populates="owner")
     training_jobs = relationship("TrainingJob", back_populates="user")
-    models = relationship("Model", back_populates="user")
-    predictions = relationship("Prediction", back_populates="user")
-    ensembles = relationship("ModelEnsemble", back_populates="user")
-    ensemble_predictions = relationship("EnsemblePrediction", back_populates="user")
+    model_versions = relationship("ModelVersion", back_populates="user")
+    test_jobs = relationship("TestJob", back_populates="user")
+
+
+# --- 2. 数据管理 ---
+class DataUpload(Base):
+    __tablename__ = "data_upload"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False)
+    original_filename = Column(String(255), nullable=False)
+    stored_path = Column(String(500), nullable=False)
+    file_size = Column(BigInteger, nullable=False)
+    status = Column(UploadStatusEnum, nullable=False, default="PENDING")
+    error_message = Column(String(2000), nullable=True)
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    processed_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="uploads")
+    dataset = relationship("Dataset", back_populates="upload", uselist=False)
+
+
+Index("idx_upload_user", DataUpload.user_id)
+Index("idx_upload_status", DataUpload.status)
+
+
+class Dataset(Base):
+    __tablename__ = "dataset"
+    __table_args__ = (
+        UniqueConstraint("upload_id", name="uk_dataset_upload"),
+        CheckConstraint(
+            "(source_type = 'BUILTIN' AND owner_user_id IS NULL AND upload_id IS NULL) OR "
+            "(source_type = 'UPLOAD' AND owner_user_id IS NOT NULL AND upload_id IS NOT NULL)",
+            name="chk_builtin_nulls",
+        ),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    owner_user_id = Column(BigInteger, ForeignKey("user.id"), nullable=True)
+    source_type = Column(SourceTypeEnum, nullable=False)
+    name = Column(String(120), nullable=False)
+    upload_id = Column(BigInteger, ForeignKey("data_upload.id"), nullable=True)
+    feature_schema = Column(JSON, nullable=True)
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    owner = relationship("User", back_populates="datasets")
+    upload = relationship("DataUpload", back_populates="dataset")
+    batteries = relationship("BatteryUnit", back_populates="dataset")
+    training_jobs = relationship("TrainingJob", back_populates="dataset")
+    test_jobs = relationship("TestJob", back_populates="dataset")
+
+
+Index("idx_dataset_owner", Dataset.owner_user_id)
 
 
 class BatteryUnit(Base):
     __tablename__ = "battery_unit"
-
-    id = Column(Integer, primary_key=True)
-    group_tag = Column(
-        Enum("train", "val", "test", name="group_tag_enum"), nullable=True
+    __table_args__ = (
+        UniqueConstraint("dataset_id", "battery_code", name="uk_dataset_battery"),
     )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    dataset_id = Column(BigInteger, ForeignKey("dataset.id"), nullable=False)
+    battery_code = Column(String(64), nullable=False)
+    group_tag = Column(GroupTagEnum, nullable=True)
     total_cycles = Column(Integer, nullable=False)
     nominal_capacity = Column(Float, nullable=True)
 
+    dataset = relationship("Dataset", back_populates="batteries")
     cycle_data = relationship("CycleData", back_populates="battery")
-    predictions = relationship("Prediction", back_populates="battery")
-    ensemble_predictions = relationship("EnsemblePrediction", back_populates="battery")
+    training_job_batteries = relationship(
+        "TrainingJobBattery", back_populates="battery"
+    )
+    test_job_batteries = relationship("TestJobBattery", back_populates="battery")
+    test_battery_metrics = relationship(
+        "TestJobBatteryMetric", back_populates="battery"
+    )
+    test_predictions = relationship("TestJobPrediction", back_populates="battery")
+
+
+Index("idx_battery_dataset", BatteryUnit.dataset_id)
 
 
 class CycleData(Base):
     __tablename__ = "cycle_data"
     __table_args__ = (
         UniqueConstraint("battery_id", "cycle_num", name="uk_battery_cycle"),
-        Index("idx_cycle_battery", "battery_id"),
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    battery_id = Column(Integer, ForeignKey("battery_unit.id"), nullable=False)
+    battery_id = Column(BigInteger, ForeignKey("battery_unit.id"), nullable=False)
     cycle_num = Column(Integer, nullable=False)
     feature_1 = Column(Float, nullable=False)
     feature_2 = Column(Float, nullable=False)
@@ -99,27 +177,20 @@ class CycleData(Base):
     battery = relationship("BatteryUnit", back_populates="cycle_data")
 
 
+Index("idx_cycle_battery", CycleData.battery_id)
+
+
+# --- 3. 训练平台 ---
 class TrainingJob(Base):
     __tablename__ = "training_job"
-    __table_args__ = (
-        Index("idx_job_status", "status"),
-        Index("idx_job_user", "user_id"),
-    )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False)
-    algorithm = Column(
-        Enum("baseline", "bilstm", "deephpm", name="algorithm_enum"), nullable=False
-    )
-    status = Column(
-        Enum("queued", "running", "succeeded", "failed", "stopped", name="status_enum"),
-        nullable=False,
-    )
-    model_name = Column(String(120), nullable=True)
+    dataset_id = Column(BigInteger, ForeignKey("dataset.id"), nullable=False)
+    target = Column(TargetEnum, nullable=False)
     hyperparams = Column(JSON, nullable=True)
+    status = Column(JobStatusEnum, nullable=False, default="PENDING")
     progress = Column(Numeric(6, 5), nullable=False, default=0.0)
-    current_epoch = Column(Integer, nullable=False, default=0)
-    total_epochs = Column(Integer, nullable=False, default=0)
     created_at = Column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -127,188 +198,276 @@ class TrainingJob(Base):
     finished_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="training_jobs")
+    dataset = relationship("Dataset", back_populates="training_jobs")
     batteries = relationship("TrainingJobBattery", back_populates="job")
-    metrics = relationship("TrainingJobMetric", back_populates="job")
-    logs = relationship("TrainingJobLog", back_populates="job")
-    models = relationship("Model", back_populates="job")
+    runs = relationship("TrainingJobRun", back_populates="job")
+
+
+Index("idx_training_user", TrainingJob.user_id)
+Index("idx_training_status", TrainingJob.status)
+Index("idx_training_dataset", TrainingJob.dataset_id)
+Index("idx_training_created", TrainingJob.created_at)
 
 
 class TrainingJobBattery(Base):
     __tablename__ = "training_job_battery"
-    __table_args__ = (Index("idx_job_battery", "battery_id"),)
 
     job_id = Column(BigInteger, ForeignKey("training_job.id"), primary_key=True)
-    battery_id = Column(Integer, ForeignKey("battery_unit.id"), primary_key=True)
-    split_role = Column(
-        Enum("train", "val", "test", name="split_role_enum"),
-        nullable=False,
-        default="train",
-        primary_key=True,
-    )
+    battery_id = Column(BigInteger, ForeignKey("battery_unit.id"), primary_key=True)
+    split_role = Column(GroupTagEnum, nullable=False, default="train")
 
     job = relationship("TrainingJob", back_populates="batteries")
+    battery = relationship("BatteryUnit", back_populates="training_job_batteries")
 
 
-class TrainingJobMetric(Base):
-    __tablename__ = "training_job_metric"
-    __table_args__ = (
-        UniqueConstraint("job_id", "epoch", name="uk_job_epoch"),
-        Index("idx_metric_job", "job_id"),
-    )
+Index("idx_job_battery", TrainingJobBattery.battery_id)
+
+
+class TrainingJobRun(Base):
+    __tablename__ = "training_job_run"
+    __table_args__ = (UniqueConstraint("job_id", "algorithm", name="uk_job_algorithm"),)
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     job_id = Column(BigInteger, ForeignKey("training_job.id"), nullable=False)
+    algorithm = Column(AlgorithmEnum, nullable=False)
+    status = Column(JobStatusEnum, nullable=False, default="PENDING")
+    current_epoch = Column(Integer, nullable=False, default=0)
+    total_epochs = Column(Integer, nullable=False, default=0)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+    job = relationship("TrainingJob", back_populates="runs")
+    metrics = relationship("TrainingJobRunMetric", back_populates="run")
+    logs = relationship("TrainingJobRunLog", back_populates="run")
+    model_version = relationship("ModelVersion", back_populates="run", uselist=False)
+
+
+Index("idx_run_job", TrainingJobRun.job_id)
+Index("idx_run_status", TrainingJobRun.status)
+
+
+class TrainingJobRunMetric(Base):
+    __tablename__ = "training_job_run_metric"
+    __table_args__ = (UniqueConstraint("run_id", "epoch", name="uk_run_epoch"),)
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    run_id = Column(BigInteger, ForeignKey("training_job_run.id"), nullable=False)
     epoch = Column(Integer, nullable=False)
     train_loss = Column(Float, nullable=True)
     val_loss = Column(Float, nullable=True)
     metrics = Column(JSON, nullable=True)
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
 
-    job = relationship("TrainingJob", back_populates="metrics")
+    run = relationship("TrainingJobRun", back_populates="metrics")
 
 
-class TrainingJobLog(Base):
-    __tablename__ = "training_job_log"
-    __table_args__ = (Index("idx_log_job", "job_id"),)
+Index("idx_metric_run", TrainingJobRunMetric.run_id)
+
+
+class TrainingJobRunLog(Base):
+    __tablename__ = "training_job_run_log"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    job_id = Column(BigInteger, ForeignKey("training_job.id"), nullable=False)
-    level = Column(
-        Enum("DEBUG", "INFO", "WARNING", "ERROR", name="log_level_enum"), nullable=False
-    )
+    run_id = Column(BigInteger, ForeignKey("training_job_run.id"), nullable=False)
+    user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False)
+    level = Column(LogLevelEnum, nullable=False)
     message = Column(String(2000), nullable=False)
     created_at = Column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
-    job = relationship("TrainingJob", back_populates="logs")
+    run = relationship("TrainingJobRun", back_populates="logs")
 
 
-class Model(Base):
-    __tablename__ = "model"
+Index("idx_log_run", TrainingJobRunLog.run_id)
+Index("idx_log_user", TrainingJobRunLog.user_id)
+Index("idx_log_run_time", TrainingJobRunLog.run_id, TrainingJobRunLog.created_at)
+
+
+# --- 4. 模型版本管理 ---
+class ModelVersion(Base):
+    __tablename__ = "model_version"
     __table_args__ = (
-        UniqueConstraint("algorithm", "name", "version", name="uk_model_version"),
-        Index("idx_model_job", "job_id"),
-        Index("idx_model_user", "user_id"),
+        UniqueConstraint("run_id", name="uk_model_run"),
+        UniqueConstraint("user_id", "name", "version", name="uk_model_version"),
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False)
-    algorithm = Column(
-        Enum("baseline", "bilstm", "deephpm", name="algorithm_enum"), nullable=False
-    )
+    run_id = Column(BigInteger, ForeignKey("training_job_run.id"), nullable=False)
+    algorithm = Column(AlgorithmEnum, nullable=False)
     name = Column(String(120), nullable=False)
     version = Column(String(32), nullable=False)
-    job_id = Column(BigInteger, ForeignKey("training_job.id"), nullable=True)
-    metrics = Column(JSON, nullable=True)
-    file_path = Column(String(255), nullable=False)
-    created_at = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
-
-    user = relationship("User", back_populates="models")
-    job = relationship("TrainingJob", back_populates="models")
-    predictions = relationship("Prediction", back_populates="model")
-    ensemble_members = relationship("ModelEnsembleMember", back_populates="model")
-
-
-class Prediction(Base):
-    __tablename__ = "prediction"
-    __table_args__ = (
-        Index("idx_pred_model", "model_id"),
-        Index("idx_pred_battery", "battery_id"),
-        Index("idx_pred_user", "user_id"),
-    )
-
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False)
-    model_id = Column(BigInteger, ForeignKey("model.id"), nullable=False)
-    battery_id = Column(Integer, ForeignKey("battery_unit.id"), nullable=True)
-    input_source = Column(
-        Enum("battery", "payload", name="input_source_enum"), nullable=False
-    )
-    input_payload = Column(JSON, nullable=True)
-    soh = Column(Float, nullable=True)
-    rul = Column(Float, nullable=True)
-    result = Column(JSON, nullable=True)
-    created_at = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
-
-    user = relationship("User", back_populates="predictions")
-    model = relationship("Model", back_populates="predictions")
-    battery = relationship("BatteryUnit", back_populates="predictions")
-
-
-class ModelEnsemble(Base):
-    __tablename__ = "model_ensemble"
-    __table_args__ = (Index("idx_ensemble_user", "user_id"),)
-
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False)
-    name = Column(String(120), nullable=False)
-    strategy = Column(
-        Enum("compare", "avg", "weighted_avg", "stacking", name="strategy_enum"),
-        nullable=False,
-    )
     config = Column(JSON, nullable=True)
+    metrics = Column(JSON, nullable=True)
+    checkpoint_path = Column(String(500), nullable=False)
     created_at = Column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
-    user = relationship("User", back_populates="ensembles")
-    members = relationship("ModelEnsembleMember", back_populates="ensemble")
-    predictions = relationship("EnsemblePrediction", back_populates="ensemble")
+    user = relationship("User", back_populates="model_versions")
+    run = relationship("TrainingJobRun", back_populates="model_version")
+    test_jobs = relationship("TestJob", back_populates="model_version")
 
 
-class ModelEnsembleMember(Base):
-    __tablename__ = "model_ensemble_member"
-
-    ensemble_id = Column(BigInteger, ForeignKey("model_ensemble.id"), primary_key=True)
-    model_id = Column(BigInteger, ForeignKey("model.id"), primary_key=True)
-    weight = Column(Numeric(8, 6), nullable=True)
-
-    ensemble = relationship("ModelEnsemble", back_populates="members")
-    model = relationship("Model", back_populates="ensemble_members")
+Index("idx_model_user", ModelVersion.user_id)
+Index("idx_model_algorithm", ModelVersion.algorithm)
 
 
-class EnsemblePrediction(Base):
-    __tablename__ = "ensemble_prediction"
-    __table_args__ = (
-        Index("idx_ensemble_pred", "ensemble_id"),
-        Index("idx_ensemble_pred_user", "user_id"),
-    )
+# --- 5. 测试平台 ---
+class TestJob(Base):
+    __tablename__ = "test_job"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False)
-    ensemble_id = Column(BigInteger, ForeignKey("model_ensemble.id"), nullable=False)
-    battery_id = Column(Integer, ForeignKey("battery_unit.id"), nullable=True)
-    input_payload = Column(JSON, nullable=True)
-    soh = Column(Float, nullable=True)
-    rul = Column(Float, nullable=True)
-    result = Column(JSON, nullable=True)
+    model_version_id = Column(
+        BigInteger, ForeignKey("model_version.id"), nullable=False
+    )
+    dataset_id = Column(BigInteger, ForeignKey("dataset.id"), nullable=False)
+    target = Column(TargetEnum, nullable=False)
+    horizon = Column(Integer, nullable=False, default=1)
+    status = Column(JobStatusEnum, nullable=False, default="PENDING")
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="test_jobs")
+    model_version = relationship("ModelVersion", back_populates="test_jobs")
+    dataset = relationship("Dataset", back_populates="test_jobs")
+    batteries = relationship("TestJobBattery", back_populates="test_job")
+    overall_metrics = relationship("TestJobMetricOverall", back_populates="test_job")
+    battery_metrics = relationship("TestJobBatteryMetric", back_populates="test_job")
+    predictions = relationship("TestJobPrediction", back_populates="test_job")
+    logs = relationship("TestJobLog", back_populates="test_job")
+    exports = relationship("TestExport", back_populates="test_job")
+
+
+Index("idx_test_user", TestJob.user_id)
+Index("idx_test_status", TestJob.status)
+Index("idx_test_model", TestJob.model_version_id)
+Index("idx_test_dataset", TestJob.dataset_id)
+Index("idx_test_created", TestJob.created_at)
+
+
+class TestJobBattery(Base):
+    __tablename__ = "test_job_battery"
+
+    test_job_id = Column(BigInteger, ForeignKey("test_job.id"), primary_key=True)
+    battery_id = Column(BigInteger, ForeignKey("battery_unit.id"), primary_key=True)
+
+    test_job = relationship("TestJob", back_populates="batteries")
+    battery = relationship("BatteryUnit", back_populates="test_job_batteries")
+
+
+Index("idx_test_battery", TestJobBattery.battery_id)
+
+
+class TestJobMetricOverall(Base):
+    __tablename__ = "test_job_metric_overall"
+    __table_args__ = (UniqueConstraint("test_job_id", "target", name="uk_test_target"),)
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    test_job_id = Column(BigInteger, ForeignKey("test_job.id"), nullable=False)
+    target = Column(Enum("RUL", "PCL", name="metric_target_enum"), nullable=False)
+    metrics = Column(JSON, nullable=False)
     created_at = Column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
-    user = relationship("User", back_populates="ensemble_predictions")
-    ensemble = relationship("ModelEnsemble", back_populates="predictions")
-    battery = relationship("BatteryUnit", back_populates="ensemble_predictions")
-    details = relationship(
-        "EnsemblePredictionDetail", back_populates="ensemble_prediction"
+    test_job = relationship("TestJob", back_populates="overall_metrics")
+
+
+Index("idx_metric_test", TestJobMetricOverall.test_job_id)
+
+
+class TestJobBatteryMetric(Base):
+    __tablename__ = "test_job_battery_metric"
+    __table_args__ = (
+        UniqueConstraint(
+            "test_job_id", "battery_id", "target", name="uk_test_battery_target"
+        ),
     )
-
-
-class EnsemblePredictionDetail(Base):
-    __tablename__ = "ensemble_prediction_detail"
-    __table_args__ = (Index("idx_ensemble_pred_detail", "ensemble_prediction_id"),)
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    ensemble_prediction_id = Column(
-        BigInteger, ForeignKey("ensemble_prediction.id"), nullable=False
+    test_job_id = Column(BigInteger, ForeignKey("test_job.id"), nullable=False)
+    battery_id = Column(BigInteger, ForeignKey("battery_unit.id"), nullable=False)
+    target = Column(
+        Enum("RUL", "PCL", name="battery_metric_target_enum"), nullable=False
     )
-    model_id = Column(BigInteger, ForeignKey("model.id"), nullable=False)
-    soh = Column(Float, nullable=True)
-    rul = Column(Float, nullable=True)
-    result = Column(JSON, nullable=True)
+    metrics = Column(JSON, nullable=False)
 
-    ensemble_prediction = relationship("EnsemblePrediction", back_populates="details")
+    test_job = relationship("TestJob", back_populates="battery_metrics")
+    battery = relationship("BatteryUnit", back_populates="test_battery_metrics")
+
+
+Index("idx_test_battery_metric", TestJobBatteryMetric.test_job_id)
+Index("idx_battery_metric", TestJobBatteryMetric.battery_id)
+
+
+class TestJobPrediction(Base):
+    __tablename__ = "test_job_prediction"
+    __table_args__ = (
+        UniqueConstraint(
+            "test_job_id", "battery_id", "target", "cycle_num", name="uk_pred_sample"
+        ),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    test_job_id = Column(BigInteger, ForeignKey("test_job.id"), nullable=False)
+    battery_id = Column(BigInteger, ForeignKey("battery_unit.id"), nullable=False)
+    cycle_num = Column(Integer, nullable=False)
+    target = Column(Enum("RUL", "PCL", name="pred_target_enum"), nullable=False)
+    y_true = Column(Float, nullable=True)
+    y_pred = Column(Float, nullable=False)
+
+    test_job = relationship("TestJob", back_populates="predictions")
+    battery = relationship("BatteryUnit", back_populates="test_predictions")
+
+
+Index("idx_pred_test", TestJobPrediction.test_job_id)
+Index("idx_pred_battery", TestJobPrediction.battery_id)
+
+
+class TestJobLog(Base):
+    __tablename__ = "test_job_log"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    test_job_id = Column(BigInteger, ForeignKey("test_job.id"), nullable=False)
+    user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False)
+    level = Column(LogLevelEnum, nullable=False)
+    message = Column(String(2000), nullable=False)
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    test_job = relationship("TestJob", back_populates="logs")
+
+
+Index("idx_test_log", TestJobLog.test_job_id)
+Index("idx_test_log_user", TestJobLog.user_id)
+Index("idx_test_log_time", TestJobLog.test_job_id, TestJobLog.created_at)
+
+
+class TestExport(Base):
+    __tablename__ = "test_export"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    test_job_id = Column(BigInteger, ForeignKey("test_job.id"), nullable=False)
+    user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False)
+    format = Column(ExportFormatEnum, nullable=False)
+    file_path = Column(String(500), nullable=False)
+    file_size = Column(BigInteger, nullable=True)
+    created_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    test_job = relationship("TestJob", back_populates="exports")
+
+
+Index("idx_export_test", TestExport.test_job_id)
+Index("idx_export_user", TestExport.user_id)
+Index("idx_export_created", TestExport.created_at)
