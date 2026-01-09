@@ -464,7 +464,7 @@ class TestJobLog(Base):
 
 
 Index("idx_test_log", TestJobLog.test_job_id)
-Index("idx_test_log_user", TestJobLog.user_id)
+Index("idx_log_user", TestJobLog.user_id)
 Index("idx_test_log_time", TestJobLog.test_job_id, TestJobLog.created_at)
 
 
