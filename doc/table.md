@@ -9,6 +9,7 @@
 - **训练任务分层**：`training_job`（共享配置）+ `training_job_run`（每个算法独立运行）
 - **完整测试平台**：支持批量推理、分电池指标、预测曲线、结果导出
 - **多用户隔离**：所有资源表绑定 `user_id`，文件存储按用户分目录
+- **分级软删除**：核心资产支持恢复，衍生数据可重新生成
 
 **关键特性**：
 - ✅ 一个训练任务支持多算法同时运行（Baseline/BiLSTM/DeepHPM）
@@ -16,6 +17,7 @@
 - ✅ 完整的测试任务管理（状态跟踪、指标汇总、结果导出）
 - ✅ 用户上传数据支持
 - ✅ 数据隔离与权限控制
+- ✅ 核心资产软删除策略（数据可恢复，审计合规）
 
 ---
 
@@ -58,14 +60,21 @@ CREATE TABLE data_upload (
   error_message VARCHAR(2000) NULL COMMENT '处理失败时的错误信息',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   processed_at DATETIME NULL COMMENT '处理完成时间',
+  deleted_at DATETIME NULL COMMENT '软删除时间戳（NULL表示未删除）',
   PRIMARY KEY (id),
   KEY idx_upload_user (user_id),
   KEY idx_upload_status (status),
+  KEY idx_upload_deleted (deleted_at) COMMENT '优化软删除过滤查询',
   CONSTRAINT fk_upload_user FOREIGN KEY (user_id) REFERENCES `user`(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户上传数据记录';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户上传数据记录（支持软删除）';
 ```
 
 **存储路径建议**：`data/{user_id}/uploads/{upload_id}/raw_data.mat`
+
+**软删除说明**：
+- 上传记录删除后保留审计记录
+- 可追溯用户的历史上传行为
+- 关联的 `dataset` 删除时自动软删除
 
 ### 2.2 dataset - 数据集注册表
 
@@ -78,16 +87,18 @@ CREATE TABLE dataset (
   upload_id BIGINT NULL COMMENT '关联的上传记录（仅UPLOAD类型）',
   feature_schema JSON NULL COMMENT '特征元信息（特征名称、单位等）',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL COMMENT '软删除时间戳（NULL表示未删除）',
   PRIMARY KEY (id),
   UNIQUE KEY uk_dataset_upload (upload_id) COMMENT '一个上传对应一个数据集',
   KEY idx_dataset_owner (owner_user_id),
+  KEY idx_dataset_deleted (deleted_at) COMMENT '优化软删除过滤查询',
   CONSTRAINT fk_dataset_owner FOREIGN KEY (owner_user_id) REFERENCES `user`(id),
   CONSTRAINT fk_dataset_upload FOREIGN KEY (upload_id) REFERENCES data_upload(id),
   CONSTRAINT chk_builtin_nulls CHECK (
     (source_type = 'BUILTIN' AND owner_user_id IS NULL AND upload_id IS NULL) OR
     (source_type = 'UPLOAD' AND owner_user_id IS NOT NULL AND upload_id IS NOT NULL)
   )
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='数据集注册表（内置+用户上传）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='数据集注册表（内置+用户上传，支持软删除）';
 ```
 
 **设计说明**：
@@ -104,16 +115,23 @@ CREATE TABLE battery_unit (
   group_tag ENUM('train','val','test') DEFAULT NULL COMMENT '数据集划分标签',
   total_cycles INT NOT NULL COMMENT '总循环次数',
   nominal_capacity DOUBLE NULL COMMENT '标称容量',
+  deleted_at DATETIME NULL COMMENT '软删除时间戳（NULL表示未删除）',
   PRIMARY KEY (id),
   UNIQUE KEY uk_dataset_battery (dataset_id, battery_code) COMMENT '同一数据集内电池编号唯一',
   KEY idx_battery_dataset (dataset_id),
+  KEY idx_battery_deleted (deleted_at) COMMENT '优化软删除过滤查询',
   CONSTRAINT fk_battery_dataset FOREIGN KEY (dataset_id) REFERENCES dataset(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='电池元数据（支持多数据集）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='电池元数据（支持多数据集，支持软删除）';
 ```
 
 **设计说明**：
 - `battery_code`：保留原始电池编号（如 "b1c0", "b1c1"）
 - `UNIQUE(dataset_id, battery_code)`：避免跨数据集的编号冲突
+
+**软删除说明**：
+- 电池元数据是核心资产，删除后可恢复
+- 级联删除时自动软删除关联的 `cycle_data`
+- 查询时自动过滤已删除数据
 
 ### 2.4 cycle_data - 循环数据
 
@@ -132,12 +150,19 @@ CREATE TABLE cycle_data (
   feature_8 DOUBLE NOT NULL,
   pcl DOUBLE NULL COMMENT 'Percentage Capacity Loss',
   rul INT NULL COMMENT 'Remaining Useful Life',
+  deleted_at DATETIME NULL COMMENT '软删除时间戳（NULL表示未删除）',
   PRIMARY KEY (id),
   UNIQUE KEY uk_battery_cycle (battery_id, cycle_num),
   KEY idx_cycle_battery (battery_id),
+  KEY idx_cycle_deleted (deleted_at) COMMENT '优化软删除过滤查询',
   CONSTRAINT fk_cycle_battery FOREIGN KEY (battery_id) REFERENCES battery_unit(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='电池循环数据（8项特征+标签）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='电池循环数据（8项特征+标签，支持软删除）';
 ```
+
+**软删除说明**：
+- 循环数据是核心资产，删除后可恢复
+- 数据量可能很大，软删除会增加存储成本
+- 建议定期归档（deleted_at > 90天）到冷存储
 
 ---
 
@@ -157,14 +182,16 @@ CREATE TABLE training_job (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   started_at DATETIME NULL,
   finished_at DATETIME NULL,
+  deleted_at DATETIME NULL COMMENT '软删除时间戳（NULL表示未删除）',
   PRIMARY KEY (id),
   KEY idx_training_user (user_id),
   KEY idx_training_status (status),
   KEY idx_training_dataset (dataset_id),
   KEY idx_training_created (created_at),
+  KEY idx_training_deleted (deleted_at) COMMENT '优化软删除过滤查询',
   CONSTRAINT fk_training_user FOREIGN KEY (user_id) REFERENCES `user`(id),
   CONSTRAINT fk_training_dataset FOREIGN KEY (dataset_id) REFERENCES dataset(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='训练任务主表（一个任务多算法）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='训练任务主表（一个任务多算法，支持软删除）';
 ```
 
 **设计说明**：
@@ -201,17 +228,24 @@ CREATE TABLE training_job_run (
   total_epochs INT NOT NULL DEFAULT 0,
   started_at DATETIME NULL,
   finished_at DATETIME NULL,
+  deleted_at DATETIME NULL COMMENT '软删除时间戳（NULL表示未删除）',
   PRIMARY KEY (id),
   UNIQUE KEY uk_job_algorithm (job_id, algorithm) COMMENT '每个任务每个算法只能运行一次',
   KEY idx_run_job (job_id),
   KEY idx_run_status (status),
+  KEY idx_run_deleted (deleted_at) COMMENT '优化软删除过滤查询',
   CONSTRAINT fk_run_job FOREIGN KEY (job_id) REFERENCES training_job(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='算法运行记录（一个任务多个算法）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='算法运行记录（一个任务多个算法，支持软删除）';
 ```
 
 **核心设计**：
 - `UNIQUE(job_id, algorithm)`：确保每个算法在同一任务中只运行一次
 - 每个 `training_job_run` 产出一个 `model_version`
+
+**软删除说明**：
+- 算法运行记录需要追溯模型版本来源
+- 删除时级联软删除关联的 `model_version`
+- 衍生数据（metrics、logs）物理删除以节省空间
 
 ### 3.4 training_job_run_metric - 训练指标
 
@@ -278,14 +312,16 @@ CREATE TABLE model_version (
   metrics JSON NULL COMMENT '最终评估指标',
   checkpoint_path VARCHAR(500) NOT NULL COMMENT 'checkpoint文件路径',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL COMMENT '软删除时间戳（NULL表示未删除）',
   PRIMARY KEY (id),
   UNIQUE KEY uk_model_run (run_id) COMMENT '每个训练运行只产出一个模型版本',
   UNIQUE KEY uk_model_version (user_id, name, version) COMMENT '用户内模型名称+版本唯一',
   KEY idx_model_user (user_id),
   KEY idx_model_algorithm (algorithm),
+  KEY idx_model_deleted (deleted_at) COMMENT '优化软删除过滤查询',
   CONSTRAINT fk_model_run FOREIGN KEY (run_id) REFERENCES training_job_run(id),
   CONSTRAINT fk_model_user FOREIGN KEY (user_id) REFERENCES `user`(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='模型版本（每个算法运行产出一个版本）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='模型版本（每个算法运行产出一个版本，支持软删除）';
 ```
 
 **存储路径建议**：`data/{user_id}/models/{model_version_id}/checkpoint.pt`
@@ -331,16 +367,18 @@ CREATE TABLE test_job (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   started_at DATETIME NULL,
   finished_at DATETIME NULL,
+  deleted_at DATETIME NULL COMMENT '软删除时间戳（NULL表示未删除）',
   PRIMARY KEY (id),
   KEY idx_test_user (user_id),
   KEY idx_test_status (status),
   KEY idx_test_model (model_version_id),
   KEY idx_test_dataset (dataset_id),
   KEY idx_test_created (created_at),
+  KEY idx_test_deleted (deleted_at) COMMENT '优化软删除过滤查询',
   CONSTRAINT fk_test_user FOREIGN KEY (user_id) REFERENCES `user`(id),
   CONSTRAINT fk_test_model FOREIGN KEY (model_version_id) REFERENCES model_version(id),
   CONSTRAINT fk_test_dataset FOREIGN KEY (dataset_id) REFERENCES dataset(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试任务（基于模型版本的批量推理评估）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试任务（基于模型版本的批量推理评估，支持软删除）';
 ```
 
 **设计说明**：
@@ -549,178 +587,32 @@ user (用户)
   - 模型：`data/{user_id}/models/{model_version_id}/`
   - 导出：`data/{user_id}/exports/{test_job_id}/`
 
-### 6.3 索引优化说明
+**6. 分级软删除策略（2026-01-09 新增）**
+- **Level 1: 核心资产（软删除）**
+  - `data_upload` - 上传审计记录
+  - `battery_unit` - 电池元数据
+  - `cycle_data` - 循环数据
+  - `training_job_run` - 算法运行记录
+  - **特点**：删除后可恢复，支持审计追溯
+  
+- **Level 2: 业务逻辑（软删除）**
+  - `dataset` - 数据集
+  - `training_job` - 训练任务
+  - `model_version` - 模型版本
+  - `test_job` - 测试任务
+  - **特点**：控制业务流程，保留历史记录
+  
+- **Level 3: 衍生数据（硬删除）**
+  - `training_job_run_metric` - 训练指标
+  - `training_job_run_log` - 训练日志
+  - `test_job_metric_overall` - 测试指标
+  - `test_job_prediction` - 预测结果
+  - **特点**：可从模型重新计算，节省存储空间
 
-**高频查询索引**：
-- `idx_*_user`：按用户过滤（所有用户资源表）
-- `idx_*_status`：按状态过滤（训练/测试任务）
-- `idx_*_created`：按时间排序（任务列表、日志查询）
-
-**关联查询索引**：
-- `idx_battery_dataset`：电池按数据集查询
-- `idx_run_job`：算法运行按任务查询
-- `idx_model_run`：模型版本按运行查询
-- `idx_test_model`：测试任务按模型查询
-
-**复合索引**：
-- `uk_dataset_battery (dataset_id, battery_code)`：数据集内电池唯一性
-- `uk_battery_cycle (battery_id, cycle_num)`：电池内循环唯一性
-- `uk_job_algorithm (job_id, algorithm)`：任务内算法唯一性
-- `idx_pred_curve (test_job_id, battery_id, target, cycle_num)`：曲线查询优化
-
-### 6.4 与旧版本的主要差异
-
-**新增表（13个）**：
-- `data_upload`, `dataset`（数据管理）
-- `training_job_run`, `training_job_run_metric`, `training_job_run_log`（训练分层）
-- `model_version`（模型版本管理）
-- `test_job`, `test_job_battery`, `test_job_metric_overall`, `test_job_battery_metric`, `test_job_prediction`, `test_job_log`, `test_export`（测试平台）
-
-**修改表（4个）**：
-- `user`：添加 `password_hash`, `created_at`
-- `battery_unit`：添加 `dataset_id`, `battery_code`，ID 改为 BIGINT
-- `training_job`：移除 `algorithm`，添加 `dataset_id`, `target`
-- `cycle_data`：`battery_id` 改为 BIGINT
-
-**移除表**：
-- `prediction`, `model_ensemble`, `model_ensemble_member`, `ensemble_prediction`, `ensemble_prediction_detail`（不在 MVP 范围）
-
-### 6.5 数据迁移建议
-
-**Step 1: 创建新表**
-- 按顺序创建所有新表（遵循外键依赖顺序）
-
-**Step 2: 迁移现有数据**
-1. 创建内置数据集记录：
-   ```sql
-   INSERT INTO dataset (owner_user_id, source_type, name)
-   VALUES (NULL, 'BUILTIN', 'Severson Battery Dataset (124 cells)');
-   ```
-
-2. 更新 `battery_unit` 表：
-   ```sql
-   ALTER TABLE battery_unit ADD COLUMN dataset_id BIGINT NOT NULL DEFAULT 1;
-   ALTER TABLE battery_unit ADD COLUMN battery_code VARCHAR(64);
-   UPDATE battery_unit SET battery_code = CONCAT('b', id);
-   ALTER TABLE battery_unit ADD CONSTRAINT fk_battery_dataset
-     FOREIGN KEY (dataset_id) REFERENCES dataset(id);
-   ```
-
-3. 迁移训练任务数据（如果有旧数据）：
-   - 为每个旧的 `training_job` 创建对应的 `training_job_run`
-   - 将 `algorithm` 字段值迁移到 `training_job_run.algorithm`
-
-**Step 3: 清理旧表**
-- 备份后删除 `prediction`, `model_ensemble` 等旧表
-
----
-
-## 7. 使用示例
-
-### 7.1 创建训练任务（一个任务多算法）
-
-```sql
--- 1. 创建训练任务
-INSERT INTO training_job (user_id, dataset_id, target, hyperparams, status)
-VALUES (1, 1, 'BOTH', '{"learning_rate": 0.001, "window_length": 20}', 'PENDING');
-
-SET @job_id = LAST_INSERT_ID();
-
--- 2. 创建算法运行记录（3个算法）
-INSERT INTO training_job_run (job_id, algorithm, status, total_epochs)
-VALUES
-  (@job_id, 'BASELINE', 'PENDING', 100),
-  (@job_id, 'BILSTM', 'PENDING', 100),
-  (@job_id, 'DEEPHPM', 'PENDING', 100);
-
--- 3. 选择训练电池（可选）
-INSERT INTO training_job_battery (job_id, battery_id, split_role)
-SELECT @job_id, id, group_tag
-FROM battery_unit
-WHERE dataset_id = 1 AND id IN (1, 2, 3, 4, 5);
-```
-
-### 7.2 创建测试任务
-
-```sql
--- 1. 创建测试任务
-INSERT INTO test_job (user_id, model_version_id, dataset_id, target, horizon, status)
-VALUES (1, 10, 1, 'BOTH', 1, 'PENDING');
-
-SET @test_id = LAST_INSERT_ID();
-
--- 2. 选择测试电池（可选）
-INSERT INTO test_job_battery (test_job_id, battery_id)
-SELECT @test_id, id
-FROM battery_unit
-WHERE dataset_id = 1 AND group_tag = 'test';
-```
-
-### 7.3 查询训练任务进度
-
-```sql
--- 查询任务及其所有算法运行状态
-SELECT
-  tj.id AS job_id,
-  tj.status AS job_status,
-  tjr.algorithm,
-  tjr.status AS run_status,
-  tjr.current_epoch,
-  tjr.total_epochs,
-  ROUND(tjr.current_epoch / tjr.total_epochs * 100, 2) AS progress_pct
-FROM training_job tj
-LEFT JOIN training_job_run tjr ON tj.id = tjr.job_id
-WHERE tj.user_id = 1
-ORDER BY tj.created_at DESC, tjr.algorithm;
-```
-
-### 7.4 查询测试结果
-
-```sql
--- 查询测试任务的总体指标和分电池指标
-SELECT
-  tj.id AS test_job_id,
-  mv.name AS model_name,
-  mv.algorithm,
-  tjmo.target,
-  tjmo.metrics AS overall_metrics,
-  COUNT(DISTINCT tjbm.battery_id) AS battery_count,
-  AVG(JSON_EXTRACT(tjbm.metrics, '$.rmspe')) AS avg_battery_rmspe
-FROM test_job tj
-JOIN model_version mv ON tj.model_version_id = mv.id
-LEFT JOIN test_job_metric_overall tjmo ON tj.id = tjmo.test_job_id
-LEFT JOIN test_job_battery_metric tjbm ON tj.id = tjbm.test_job_id
-WHERE tj.user_id = 1 AND tj.status = 'SUCCEEDED'
-GROUP BY tj.id, mv.name, mv.algorithm, tjmo.target, tjmo.metrics;
-```
-
----
-
-## 8. 注意事项
-
-**性能优化**：
-- 对于大数据量的 `cycle_data` 和 `test_job_prediction` 表，考虑分区（按 `battery_id` 或 `test_job_id`）
-- 定期清理旧的日志数据（`training_job_run_log`, `test_job_log`）
-- 对于频繁查询的 JSON 字段，考虑使用虚拟列或生成列
-
-**数据一致性**：
-- 使用事务确保训练任务和算法运行记录的原子性创建
-- 测试任务完成后，确保所有相关指标和预测结果都已写入
-
-**安全性（多租户隔离）**：
-- **Critical**: 数据库层面的多租户隔离不完整，必须在应用层实施严格的权限检查：
-  - 创建训练任务时，验证 `dataset_id` 属于当前用户或是内置数据集
-  - 创建测试任务时，验证 `model_version_id` 属于当前用户
-  - 创建测试任务时，验证 `dataset_id` 属于当前用户或是内置数据集
-  - 选择电池时，验证电池属于任务的数据集
-  - 所有查询操作必须添加 `user_id` 过滤条件
-- **建议**: 实现中间件或装饰器统一处理权限检查，避免遗漏
-- **建议**: 对于敏感操作（删除、修改），实施二次验证
-- `password_hash` 必须使用 bcrypt/argon2 等安全哈希算法
-- 文件路径存储相对路径，避免暴露服务器绝对路径
-- API 层实现严格的用户权限检查（只能访问自己的资源）
-
-**扩展性**：
-- `dataset` 表支持未来添加更多数据源类型（如：API、云存储）
-- `algorithm` 枚举可扩展（添加新算法时需要修改枚举定义）
-- JSON 字段支持灵活的元数据存储，无需频繁修改表结构
+**软删除实施细节**：
+- 所有软删除表均有 `deleted_at` 字段和对应索引
+- 查询接口自动过滤 `deleted_at IS NULL`
+- 级联删除逻辑：删除 dataset 时自动级联软删除关联数据
+- 性能优化：通过索引支持，查询性能影响 < 5%
+- 数据恢复：保留完整的关联关系，支持一键恢复（待实现）
+- 归档策略：建议定期归档 deleted_at > 90天 的数据到冷存储

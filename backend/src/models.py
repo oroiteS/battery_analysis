@@ -86,6 +86,7 @@ class DataUpload(Base):
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
     processed_at = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="uploads")
     dataset = relationship("Dataset", back_populates="upload", uselist=False)
@@ -93,6 +94,7 @@ class DataUpload(Base):
 
 Index("idx_upload_user", DataUpload.user_id)
 Index("idx_upload_status", DataUpload.status)
+Index("idx_upload_deleted", DataUpload.deleted_at)
 
 
 class Dataset(Base):
@@ -115,6 +117,7 @@ class Dataset(Base):
     created_at = Column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+    deleted_at = Column(DateTime, nullable=True)
 
     owner = relationship("User", back_populates="datasets")
     upload = relationship("DataUpload", back_populates="dataset")
@@ -124,6 +127,7 @@ class Dataset(Base):
 
 
 Index("idx_dataset_owner", Dataset.owner_user_id)
+Index("idx_dataset_deleted", Dataset.deleted_at)
 
 
 class BatteryUnit(Base):
@@ -138,6 +142,7 @@ class BatteryUnit(Base):
     group_tag = Column(GroupTagEnum, nullable=True)
     total_cycles = Column(Integer, nullable=False)
     nominal_capacity = Column(Float, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
 
     dataset = relationship("Dataset", back_populates="batteries")
     cycle_data = relationship("CycleData", back_populates="battery")
@@ -152,6 +157,7 @@ class BatteryUnit(Base):
 
 
 Index("idx_battery_dataset", BatteryUnit.dataset_id)
+Index("idx_battery_deleted", BatteryUnit.deleted_at)
 
 
 class CycleData(Base):
@@ -173,11 +179,13 @@ class CycleData(Base):
     feature_8 = Column(Float, nullable=False)
     pcl = Column(Float, nullable=True)
     rul = Column(Integer, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
 
     battery = relationship("BatteryUnit", back_populates="cycle_data")
 
 
 Index("idx_cycle_battery", CycleData.battery_id)
+Index("idx_cycle_deleted", CycleData.deleted_at)
 
 
 # --- 3. 训练平台 ---
@@ -196,6 +204,7 @@ class TrainingJob(Base):
     )
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="training_jobs")
     dataset = relationship("Dataset", back_populates="training_jobs")
@@ -207,6 +216,7 @@ Index("idx_training_user", TrainingJob.user_id)
 Index("idx_training_status", TrainingJob.status)
 Index("idx_training_dataset", TrainingJob.dataset_id)
 Index("idx_training_created", TrainingJob.created_at)
+Index("idx_training_deleted", TrainingJob.deleted_at)
 
 
 class TrainingJobBattery(Base):
@@ -235,6 +245,7 @@ class TrainingJobRun(Base):
     total_epochs = Column(Integer, nullable=False, default=0)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
 
     job = relationship("TrainingJob", back_populates="runs")
     metrics = relationship("TrainingJobRunMetric", back_populates="run")
@@ -244,6 +255,7 @@ class TrainingJobRun(Base):
 
 Index("idx_run_job", TrainingJobRun.job_id)
 Index("idx_run_status", TrainingJobRun.status)
+Index("idx_run_deleted", TrainingJobRun.deleted_at)
 
 
 class TrainingJobRunMetric(Base):
@@ -306,6 +318,7 @@ class ModelVersion(Base):
     created_at = Column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+    deleted_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="model_versions")
     run = relationship("TrainingJobRun", back_populates="model_version")
@@ -314,6 +327,7 @@ class ModelVersion(Base):
 
 Index("idx_model_user", ModelVersion.user_id)
 Index("idx_model_algorithm", ModelVersion.algorithm)
+Index("idx_model_deleted", ModelVersion.deleted_at)
 
 
 # --- 5. 测试平台 ---
@@ -334,6 +348,7 @@ class TestJob(Base):
     )
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="test_jobs")
     model_version = relationship("ModelVersion", back_populates="test_jobs")
@@ -351,6 +366,7 @@ Index("idx_test_status", TestJob.status)
 Index("idx_test_model", TestJob.model_version_id)
 Index("idx_test_dataset", TestJob.dataset_id)
 Index("idx_test_created", TestJob.created_at)
+Index("idx_test_deleted", TestJob.deleted_at)
 
 
 class TestJobBattery(Base):
