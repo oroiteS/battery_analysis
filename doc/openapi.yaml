@@ -1,0 +1,410 @@
+openapi: 3.0.0
+info:
+  title: Battery Analysis Platform API
+  description: API specification for the Battery Life Analysis and Algorithm Testing Platform.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8000/api
+    description: Local Development Server
+
+paths:
+  # ----------------------------
+  # Dashboard
+  # ----------------------------
+  /dashboard/overview:
+    get:
+      summary: Get system overview statistics
+      description: Returns key metrics for the dashboard.
+      tags:
+        - Dashboard
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStats'
+
+  # ----------------------------
+  # Data Management & Analysis
+  # ----------------------------
+  /batteries:
+    get:
+      summary: Get list of all batteries
+      tags:
+        - Data Analysis
+      responses:
+        '200':
+          description: List of batteries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BatterySummary'
+
+  /batteries/{battery_id}/stats:
+    get:
+      summary: Get specific battery statistics
+      tags:
+        - Data Analysis
+      parameters:
+        - in: path
+          name: battery_id
+          required: true
+          schema:
+            type: string
+          description: Battery ID (e.g., B0001)
+      responses:
+        '200':
+          description: Battery statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatteryStats'
+
+  /batteries/{battery_id}/timeseries:
+    get:
+      summary: Get time-series data for charts
+      description: Returns voltage, current, temperature, etc. vs cycle count.
+      tags:
+        - Data Analysis
+      parameters:
+        - in: path
+          name: battery_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Time series data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeSeriesData'
+
+  /analysis/rul-correlation:
+    get:
+      summary: Get RUL vs Feature correlation data
+      description: Used for scatter plots (e.g., Voltage vs RUL).
+      tags:
+        - Data Analysis
+      parameters:
+        - in: query
+          name: feature
+          schema:
+            type: string
+            default: voltage
+          description: Feature name to correlate with RUL
+      responses:
+        '200':
+          description: Scatter plot points
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: array
+                  items:
+                    type: number
+                  description: "[feature_value, rul_value]"
+
+  /analysis/pcl-distribution:
+    get:
+      summary: Get PCL distribution data
+      description: Used for histograms.
+      tags:
+        - Data Analysis
+      responses:
+        '200':
+          description: Histogram buckets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistogramData'
+
+  /analysis/correlation-matrix:
+    get:
+      summary: Get feature correlation matrix
+      description: Used for heatmaps.
+      tags:
+        - Data Analysis
+      responses:
+        '200':
+          description: Correlation matrix data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeatmapData'
+
+  # ----------------------------
+  # Algorithm Training
+  # ----------------------------
+  /training/train:
+    post:
+      summary: Start a new training job
+      tags:
+        - Training
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrainingConfig'
+      responses:
+        '200':
+          description: Training started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                  status:
+                    type: string
+
+  /training/status/{job_id}:
+    get:
+      summary: Get training job status
+      tags:
+        - Training
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Current status and logs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingStatus'
+
+  # ----------------------------
+  # Prediction
+  # ----------------------------
+  /models:
+    get:
+      summary: Get list of available trained models
+      tags:
+        - Prediction
+      responses:
+        '200':
+          description: List of models
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModelInfo'
+
+  /prediction/predict:
+    post:
+      summary: Run prediction task
+      tags:
+        - Prediction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                battery_id:
+                  type: string
+                model_id:
+                  type: string
+      responses:
+        '200':
+          description: Prediction results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictionResult'
+
+components:
+  schemas:
+    # --- Dashboard ---
+    DashboardStats:
+      type: object
+      properties:
+        battery_count:
+          type: integer
+          example: 124
+        trained_models:
+          type: integer
+          example: 12
+        avg_rul:
+          type: string
+          example: "850 Cycles"
+        alarm_count:
+          type: integer
+          example: 3
+
+    # --- Data Analysis ---
+    BatterySummary:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "B0001"
+        name:
+          type: string
+          example: "Battery 0001"
+
+    BatteryStats:
+      type: object
+      properties:
+        voltage_mean:
+          type: number
+          example: 3.65
+        current_mean:
+          type: number
+          example: 1.2
+        max_temp:
+          type: number
+          example: 42.0
+        cycle_count:
+          type: integer
+          example: 1200
+
+    TimeSeriesData:
+      type: object
+      properties:
+        cycles:
+          type: array
+          items:
+            type: integer
+          description: X-axis data (Cycle index)
+        voltage:
+          type: array
+          items:
+            type: number
+        current:
+          type: array
+          items:
+            type: number
+        temperature:
+          type: array
+          items:
+            type: number
+
+    HistogramData:
+      type: object
+      properties:
+        categories:
+          type: array
+          items:
+            type: string
+          example: ["0-10%", "10-20%", "20-30%"]
+        values:
+          type: array
+          items:
+            type: integer
+          example: [12, 30, 45]
+
+    HeatmapData:
+      type: object
+      properties:
+        x_labels:
+          type: array
+          items:
+            type: string
+        y_labels:
+          type: array
+          items:
+            type: string
+        data:
+          type: array
+          items:
+            type: array
+            items: # [y_index, x_index, value]
+              type: number
+            minItems: 3
+            maxItems: 3
+
+    # --- Training ---
+    TrainingConfig:
+      type: object
+      properties:
+        model:
+          type: string
+          enum: [Baseline, BiLSTM, DeepHPM]
+        epochs:
+          type: integer
+          default: 100
+        batch_size:
+          type: integer
+          default: 32
+        learning_rate:
+          type: number
+          default: 0.001
+        optimizer:
+          type: string
+          enum: [Adam, SGD, RMSprop]
+        split_ratio:
+          type: number
+          default: 0.8
+
+    TrainingStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        logs:
+          type: array
+          items:
+            type: string
+        metrics: # Final or current metrics
+          type: object
+          properties:
+            loss:
+              type: number
+            rmspe:
+              type: number
+            mse:
+              type: number
+            r2:
+              type: number
+
+    # --- Prediction ---
+    ModelInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    PredictionResult:
+      type: object
+      properties:
+        rul_prediction:
+          type: array
+          items:
+            type: number
+        rul_actual:
+          type: array
+          items:
+            type: number
+        pcl_prediction:
+          type: array
+          items:
+            type: number
+        pcl_actual:
+          type: array
+          items:
+            type: number
