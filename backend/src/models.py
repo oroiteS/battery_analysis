@@ -115,6 +115,7 @@ class Dataset(Base):
     created_at = Column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+    deleted_at = Column(DateTime, nullable=True)
 
     owner = relationship("User", back_populates="datasets")
     upload = relationship("DataUpload", back_populates="dataset")
@@ -124,6 +125,7 @@ class Dataset(Base):
 
 
 Index("idx_dataset_owner", Dataset.owner_user_id)
+Index("idx_dataset_deleted", Dataset.deleted_at)
 
 
 class BatteryUnit(Base):
@@ -196,6 +198,7 @@ class TrainingJob(Base):
     )
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="training_jobs")
     dataset = relationship("Dataset", back_populates="training_jobs")
@@ -207,6 +210,7 @@ Index("idx_training_user", TrainingJob.user_id)
 Index("idx_training_status", TrainingJob.status)
 Index("idx_training_dataset", TrainingJob.dataset_id)
 Index("idx_training_created", TrainingJob.created_at)
+Index("idx_training_deleted", TrainingJob.deleted_at)
 
 
 class TrainingJobBattery(Base):
@@ -306,6 +310,7 @@ class ModelVersion(Base):
     created_at = Column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+    deleted_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="model_versions")
     run = relationship("TrainingJobRun", back_populates="model_version")
@@ -314,6 +319,7 @@ class ModelVersion(Base):
 
 Index("idx_model_user", ModelVersion.user_id)
 Index("idx_model_algorithm", ModelVersion.algorithm)
+Index("idx_model_deleted", ModelVersion.deleted_at)
 
 
 # --- 5. 测试平台 ---
@@ -334,6 +340,7 @@ class TestJob(Base):
     )
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="test_jobs")
     model_version = relationship("ModelVersion", back_populates="test_jobs")
@@ -351,6 +358,7 @@ Index("idx_test_status", TestJob.status)
 Index("idx_test_model", TestJob.model_version_id)
 Index("idx_test_dataset", TestJob.dataset_id)
 Index("idx_test_created", TestJob.created_at)
+Index("idx_test_deleted", TestJob.deleted_at)
 
 
 class TestJobBattery(Base):

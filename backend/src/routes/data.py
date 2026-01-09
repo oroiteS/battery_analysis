@@ -195,6 +195,9 @@ def list_datasets(
         func.count(BatteryUnit.id).label("battery_count"),
     ).outerjoin(BatteryUnit, Dataset.id == BatteryUnit.dataset_id)
 
+    # 软删除过滤
+    query = query.filter(Dataset.deleted_at.is_(None))
+
     # 内置数据集 + 用户自己的数据集
     query = query.filter(
         or_(Dataset.source_type == "BUILTIN", Dataset.owner_user_id == current_user.id)
@@ -227,7 +230,11 @@ def list_batteries(
     db: Session = Depends(get_db),
 ):
     """获取数据集中的电池列表"""
-    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    dataset = (
+        db.query(Dataset)
+        .filter(Dataset.id == dataset_id, Dataset.deleted_at.is_(None))
+        .first()
+    )
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
@@ -252,7 +259,10 @@ def get_battery_cycles(
 ):
     """获取电池的循环数据"""
     battery = (
-        db.query(BatteryUnit).join(Dataset).filter(BatteryUnit.id == battery_id).first()
+        db.query(BatteryUnit)
+        .join(Dataset)
+        .filter(BatteryUnit.id == battery_id, Dataset.deleted_at.is_(None))
+        .first()
     )
     if not battery:
         raise HTTPException(status_code=404, detail="Battery not found")
@@ -273,3 +283,48 @@ def get_battery_cycles(
         .all()
     )
     return cycles
+
+
+@router.delete("/datasets/{dataset_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_dataset(
+    dataset_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    软删除数据集（标记 deleted_at = 当前时间）
+
+    限制：
+    - 仅允许删除用户自己上传的数据集（source_type='UPLOAD'）
+    - 内置数据集（source_type='BUILTIN'）禁止删除
+
+    效果：
+    - dataset 表标记为删除
+    - 所有查询接口自动过滤已删除数据集
+    - 关联数据（battery_unit、training_job 等）通过查询过滤自动隐藏
+    """
+    # 查询数据集（必须未删除）
+    dataset = (
+        db.query(Dataset)
+        .filter(Dataset.id == dataset_id, Dataset.deleted_at.is_(None))
+        .first()
+    )
+
+    if not dataset:
+        raise HTTPException(
+            status_code=404, detail="Dataset not found or already deleted"
+        )
+
+    # 权限检查：禁止删除内置数据集
+    if str(dataset.source_type) == "BUILTIN":
+        raise HTTPException(status_code=403, detail="Cannot delete built-in dataset")
+
+    # 权限检查：仅允许所有者删除
+    if dataset.owner_user_id != current_user.id:  # type: ignore[arg-type]
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # 软删除：标记 deleted_at
+    dataset.deleted_at = datetime.now(timezone.utc)  # type: ignore[assignment]
+    db.commit()
+
+    return None
