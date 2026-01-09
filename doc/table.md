@@ -21,9 +21,7 @@
 
 ---
 
-## 1. 用户与认证
-
-### 1.1 user - 用户表
+## SQL 建表语句（汇总）
 
 ```sql
 CREATE TABLE `user` (
@@ -36,20 +34,7 @@ CREATE TABLE `user` (
   UNIQUE KEY uk_user_email (email),
   UNIQUE KEY uk_user_name (user_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表，支持JWT认证';
-```
 
-**字段说明**：
-- `password_hash`：存储加密后的密码（bcrypt/argon2），禁止明文存储
-- `email`：唯一，用于登录和找回密码
-- `user_name`：唯一，用于展示
-
----
-
-## 2. 数据管理
-
-### 2.1 data_upload - 用户上传记录
-
-```sql
 CREATE TABLE data_upload (
   id BIGINT NOT NULL AUTO_INCREMENT,
   user_id BIGINT NOT NULL,
@@ -67,18 +52,7 @@ CREATE TABLE data_upload (
   KEY idx_upload_deleted (deleted_at) COMMENT '优化软删除过滤查询',
   CONSTRAINT fk_upload_user FOREIGN KEY (user_id) REFERENCES `user`(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户上传数据记录（支持软删除）';
-```
 
-**存储路径建议**：`data/{user_id}/uploads/{upload_id}/raw_data.mat`
-
-**软删除说明**：
-- 上传记录删除后保留审计记录
-- 可追溯用户的历史上传行为
-- 关联的 `dataset` 删除时自动软删除
-
-### 2.2 dataset - 数据集注册表
-
-```sql
 CREATE TABLE dataset (
   id BIGINT NOT NULL AUTO_INCREMENT,
   owner_user_id BIGINT NULL COMMENT 'NULL表示内置数据集',
@@ -99,15 +73,7 @@ CREATE TABLE dataset (
     (source_type = 'UPLOAD' AND owner_user_id IS NOT NULL AND upload_id IS NOT NULL)
   )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='数据集注册表（内置+用户上传，支持软删除）';
-```
 
-**设计说明**：
-- 内置数据集：`owner_user_id = NULL`, `source_type = 'BUILTIN'`
-- 用户上传：`owner_user_id = {user_id}`, `source_type = 'UPLOAD'`, `upload_id` 指向上传记录
-
-### 2.3 battery_unit - 电池元数据
-
-```sql
 CREATE TABLE battery_unit (
   id BIGINT NOT NULL AUTO_INCREMENT,
   dataset_id BIGINT NOT NULL COMMENT '所属数据集',
@@ -122,20 +88,7 @@ CREATE TABLE battery_unit (
   KEY idx_battery_deleted (deleted_at) COMMENT '优化软删除过滤查询',
   CONSTRAINT fk_battery_dataset FOREIGN KEY (dataset_id) REFERENCES dataset(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='电池元数据（支持多数据集，支持软删除）';
-```
 
-**设计说明**：
-- `battery_code`：保留原始电池编号（如 "b1c0", "b1c1"）
-- `UNIQUE(dataset_id, battery_code)`：避免跨数据集的编号冲突
-
-**软删除说明**：
-- 电池元数据是核心资产，删除后可恢复
-- 级联删除时自动软删除关联的 `cycle_data`
-- 查询时自动过滤已删除数据
-
-### 2.4 cycle_data - 循环数据
-
-```sql
 CREATE TABLE cycle_data (
   id BIGINT NOT NULL AUTO_INCREMENT,
   battery_id BIGINT NOT NULL,
@@ -157,20 +110,7 @@ CREATE TABLE cycle_data (
   KEY idx_cycle_deleted (deleted_at) COMMENT '优化软删除过滤查询',
   CONSTRAINT fk_cycle_battery FOREIGN KEY (battery_id) REFERENCES battery_unit(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='电池循环数据（8项特征+标签，支持软删除）';
-```
 
-**软删除说明**：
-- 循环数据是核心资产，删除后可恢复
-- 数据量可能很大，软删除会增加存储成本
-- 建议定期归档（deleted_at > 90天）到冷存储
-
----
-
-## 3. 训练平台
-
-### 3.1 training_job - 训练任务（共享配置）
-
-```sql
 CREATE TABLE training_job (
   id BIGINT NOT NULL AUTO_INCREMENT,
   user_id BIGINT NOT NULL,
@@ -192,15 +132,7 @@ CREATE TABLE training_job (
   CONSTRAINT fk_training_user FOREIGN KEY (user_id) REFERENCES `user`(id),
   CONSTRAINT fk_training_dataset FOREIGN KEY (dataset_id) REFERENCES dataset(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='训练任务主表（一个任务多算法，支持软删除）';
-```
 
-**设计说明**：
-- 一个 `training_job` 可以包含多个算法运行（通过 `training_job_run` 关联）
-- `status` 反映整体任务状态（所有算法运行完成后为 SUCCEEDED）
-
-### 3.2 training_job_battery - 训练任务电池选择
-
-```sql
 CREATE TABLE training_job_battery (
   job_id BIGINT NOT NULL,
   battery_id BIGINT NOT NULL,
@@ -210,15 +142,7 @@ CREATE TABLE training_job_battery (
   CONSTRAINT fk_job_battery_job FOREIGN KEY (job_id) REFERENCES training_job(id),
   CONSTRAINT fk_job_battery_unit FOREIGN KEY (battery_id) REFERENCES battery_unit(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='训练任务电池选择（可选，用于内置数据集）';
-```
 
-**使用场景**：
-- 用户从内置数据集中选择特定电池进行训练
-- 如果不指定，则使用数据集的默认划分（`battery_unit.group_tag`）
-
-### 3.3 training_job_run - 算法运行记录
-
-```sql
 CREATE TABLE training_job_run (
   id BIGINT NOT NULL AUTO_INCREMENT,
   job_id BIGINT NOT NULL,
@@ -236,20 +160,7 @@ CREATE TABLE training_job_run (
   KEY idx_run_deleted (deleted_at) COMMENT '优化软删除过滤查询',
   CONSTRAINT fk_run_job FOREIGN KEY (job_id) REFERENCES training_job(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='算法运行记录（一个任务多个算法，支持软删除）';
-```
 
-**核心设计**：
-- `UNIQUE(job_id, algorithm)`：确保每个算法在同一任务中只运行一次
-- 每个 `training_job_run` 产出一个 `model_version`
-
-**软删除说明**：
-- 算法运行记录需要追溯模型版本来源
-- 删除时级联软删除关联的 `model_version`
-- 衍生数据（metrics、logs）物理删除以节省空间
-
-### 3.4 training_job_run_metric - 训练指标
-
-```sql
 CREATE TABLE training_job_run_metric (
   id BIGINT NOT NULL AUTO_INCREMENT,
   run_id BIGINT NOT NULL,
@@ -263,21 +174,7 @@ CREATE TABLE training_job_run_metric (
   KEY idx_metric_run (run_id),
   CONSTRAINT fk_metric_run FOREIGN KEY (run_id) REFERENCES training_job_run(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='训练指标（按epoch记录）';
-```
 
-**metrics JSON 示例**：
-```json
-{
-  "rmspe": 0.0234,
-  "mse": 0.0012,
-  "r2": 0.9876,
-  "mae": 0.0089
-}
-```
-
-### 3.5 training_job_run_log - 训练日志
-
-```sql
 CREATE TABLE training_job_run_log (
   id BIGINT NOT NULL AUTO_INCREMENT,
   run_id BIGINT NOT NULL,
@@ -292,15 +189,7 @@ CREATE TABLE training_job_run_log (
   CONSTRAINT fk_log_run FOREIGN KEY (run_id) REFERENCES training_job_run(id),
   CONSTRAINT fk_log_user FOREIGN KEY (user_id) REFERENCES `user`(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='训练日志（按算法运行记录）';
-```
 
----
-
-## 4. 模型版本管理
-
-### 4.1 model_version - 模型版本
-
-```sql
 CREATE TABLE model_version (
   id BIGINT NOT NULL AUTO_INCREMENT,
   user_id BIGINT NOT NULL,
@@ -322,7 +211,230 @@ CREATE TABLE model_version (
   CONSTRAINT fk_model_run FOREIGN KEY (run_id) REFERENCES training_job_run(id),
   CONSTRAINT fk_model_user FOREIGN KEY (user_id) REFERENCES `user`(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='模型版本（每个算法运行产出一个版本，支持软删除）';
+
+CREATE TABLE test_job (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  model_version_id BIGINT NOT NULL COMMENT '使用的模型版本',
+  dataset_id BIGINT NOT NULL COMMENT '测试数据集',
+  target ENUM('RUL','PCL','BOTH') NOT NULL COMMENT '预测目标',
+  horizon INT NOT NULL DEFAULT 1 COMMENT '预测步长',
+  status ENUM('PENDING','RUNNING','SUCCEEDED','FAILED','CANCELED') NOT NULL DEFAULT 'PENDING',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at DATETIME NULL,
+  finished_at DATETIME NULL,
+  deleted_at DATETIME NULL COMMENT '软删除时间戳（NULL表示未删除）',
+  PRIMARY KEY (id),
+  KEY idx_test_user (user_id),
+  KEY idx_test_status (status),
+  KEY idx_test_model (model_version_id),
+  KEY idx_test_dataset (dataset_id),
+  KEY idx_test_created (created_at),
+  KEY idx_test_deleted (deleted_at) COMMENT '优化软删除过滤查询',
+  CONSTRAINT fk_test_user FOREIGN KEY (user_id) REFERENCES `user`(id),
+  CONSTRAINT fk_test_model FOREIGN KEY (model_version_id) REFERENCES model_version(id),
+  CONSTRAINT fk_test_dataset FOREIGN KEY (dataset_id) REFERENCES dataset(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试任务（基于模型版本的批量推理评估，支持软删除）';
+
+CREATE TABLE test_job_battery (
+  test_job_id BIGINT NOT NULL,
+  battery_id BIGINT NOT NULL,
+  PRIMARY KEY (test_job_id, battery_id),
+  KEY idx_test_battery (battery_id),
+  CONSTRAINT fk_tjb_test FOREIGN KEY (test_job_id) REFERENCES test_job(id),
+  CONSTRAINT fk_tjb_battery FOREIGN KEY (battery_id) REFERENCES battery_unit(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试任务电池选择（可选，用于选择特定电池）';
+
+CREATE TABLE test_job_metric_overall (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  test_job_id BIGINT NOT NULL,
+  target ENUM('RUL','PCL') NOT NULL,
+  metrics JSON NOT NULL COMMENT '总体指标（RMSPE, MSE, R², MAE等）',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_test_target (test_job_id, target),
+  KEY idx_metric_test (test_job_id),
+  CONSTRAINT fk_test_metric_job FOREIGN KEY (test_job_id) REFERENCES test_job(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试总体指标（按预测目标）';
+
+CREATE TABLE test_job_battery_metric (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  test_job_id BIGINT NOT NULL,
+  battery_id BIGINT NOT NULL,
+  target ENUM('RUL','PCL') NOT NULL,
+  metrics JSON NOT NULL COMMENT '该电池的指标',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_test_battery_target (test_job_id, battery_id, target),
+  KEY idx_test_battery_metric (test_job_id),
+  KEY idx_battery_metric (battery_id),
+  CONSTRAINT fk_tbm_test FOREIGN KEY (test_job_id) REFERENCES test_job(id),
+  CONSTRAINT fk_tbm_battery FOREIGN KEY (battery_id) REFERENCES battery_unit(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试分电池指标（用于识别困难样本）';
+
+CREATE TABLE test_job_prediction (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  test_job_id BIGINT NOT NULL,
+  battery_id BIGINT NOT NULL,
+  cycle_num INT NOT NULL COMMENT '循环编号',
+  target ENUM('RUL','PCL') NOT NULL,
+  y_true DOUBLE NULL COMMENT '真实值（离线评估时必填）',
+  y_pred DOUBLE NOT NULL COMMENT '预测值',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_pred_sample (test_job_id, battery_id, target, cycle_num) COMMENT '每个样本唯一',
+  KEY idx_pred_test (test_job_id),
+  KEY idx_pred_battery (battery_id),
+  CONSTRAINT fk_pred_test FOREIGN KEY (test_job_id) REFERENCES test_job(id),
+  CONSTRAINT fk_pred_battery FOREIGN KEY (battery_id) REFERENCES battery_unit(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试预测结果（逐样本，支持曲线绘制和导出）';
+
+CREATE TABLE test_job_log (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  test_job_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL COMMENT '日志所属用户（数据隔离）',
+  level ENUM('DEBUG','INFO','WARNING','ERROR') NOT NULL,
+  message VARCHAR(2000) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_test_log (test_job_id),
+  KEY idx_log_user (user_id),
+  KEY idx_test_log_time (test_job_id, created_at) COMMENT '优化按测试任务查询并排序',
+  CONSTRAINT fk_test_log_job FOREIGN KEY (test_job_id) REFERENCES test_job(id),
+  CONSTRAINT fk_test_log_user FOREIGN KEY (user_id) REFERENCES `user`(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试日志';
+
+CREATE TABLE test_export (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  test_job_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  format ENUM('CSV','XLSX') NOT NULL,
+  file_path VARCHAR(500) NOT NULL COMMENT '导出文件路径',
+  file_size BIGINT NULL COMMENT '文件大小（字节）',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_export_test (test_job_id),
+  KEY idx_export_user (user_id),
+  KEY idx_export_created (created_at),
+  CONSTRAINT fk_export_test FOREIGN KEY (test_job_id) REFERENCES test_job(id),
+  CONSTRAINT fk_export_user FOREIGN KEY (user_id) REFERENCES `user`(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试结果导出记录';
 ```
+
+---
+
+## 1. 用户与认证
+
+### 1.1 user - 用户表
+
+建表语句见「SQL 建表语句（汇总）」。
+
+**字段说明**：
+- `password_hash`：存储加密后的密码（bcrypt/argon2），禁止明文存储
+- `email`：唯一，用于登录和找回密码
+- `user_name`：唯一，用于展示
+
+---
+
+## 2. 数据管理
+
+### 2.1 data_upload - 用户上传记录
+
+建表语句见「SQL 建表语句（汇总）」。
+
+**存储路径建议**：`data/{user_id}/uploads/{upload_id}/raw_data.mat`
+
+**软删除说明**：
+- 上传记录删除后保留审计记录
+- 可追溯用户的历史上传行为
+- 关联的 `dataset` 删除时自动软删除
+
+### 2.2 dataset - 数据集注册表
+
+建表语句见「SQL 建表语句（汇总）」。
+
+**设计说明**：
+- 内置数据集：`owner_user_id = NULL`, `source_type = 'BUILTIN'`
+- 用户上传：`owner_user_id = {user_id}`, `source_type = 'UPLOAD'`, `upload_id` 指向上传记录
+
+### 2.3 battery_unit - 电池元数据
+
+建表语句见「SQL 建表语句（汇总）」。
+
+**设计说明**：
+- `battery_code`：保留原始电池编号（如 "b1c0", "b1c1"）
+- `UNIQUE(dataset_id, battery_code)`：避免跨数据集的编号冲突
+
+**软删除说明**：
+- 电池元数据是核心资产，删除后可恢复
+- 级联删除时自动软删除关联的 `cycle_data`
+- 查询时自动过滤已删除数据
+
+### 2.4 cycle_data - 循环数据
+
+建表语句见「SQL 建表语句（汇总）」。
+
+**软删除说明**：
+- 循环数据是核心资产，删除后可恢复
+- 数据量可能很大，软删除会增加存储成本
+- 建议定期归档（deleted_at > 90天）到冷存储
+
+---
+
+## 3. 训练平台
+
+### 3.1 training_job - 训练任务（共享配置）
+
+建表语句见「SQL 建表语句（汇总）」。
+
+**设计说明**：
+- 一个 `training_job` 可以包含多个算法运行（通过 `training_job_run` 关联）
+- `status` 反映整体任务状态（所有算法运行完成后为 SUCCEEDED）
+
+### 3.2 training_job_battery - 训练任务电池选择
+
+建表语句见「SQL 建表语句（汇总）」。
+
+**使用场景**：
+- 用户从内置数据集中选择特定电池进行训练
+- 如果不指定，则使用数据集的默认划分（`battery_unit.group_tag`）
+
+### 3.3 training_job_run - 算法运行记录
+
+建表语句见「SQL 建表语句（汇总）」。
+
+**核心设计**：
+- `UNIQUE(job_id, algorithm)`：确保每个算法在同一任务中只运行一次
+- 每个 `training_job_run` 产出一个 `model_version`
+
+**软删除说明**：
+- 算法运行记录需要追溯模型版本来源
+- 删除时级联软删除关联的 `model_version`
+- 衍生数据（metrics、logs）物理删除以节省空间
+
+### 3.4 training_job_run_metric - 训练指标
+
+建表语句见「SQL 建表语句（汇总）」。
+
+**metrics JSON 示例**：
+```json
+{
+  "rmspe": 0.0234,
+  "mse": 0.0012,
+  "r2": 0.9876,
+  "mae": 0.0089
+}
+```
+
+### 3.5 training_job_run_log - 训练日志
+
+建表语句见「SQL 建表语句（汇总）」。
+
+---
+
+## 4. 模型版本管理
+
+### 4.1 model_version - 模型版本
+
+建表语句见「SQL 建表语句（汇总）」。
 
 **存储路径建议**：`data/{user_id}/models/{model_version_id}/checkpoint.pt`
 
@@ -355,31 +467,7 @@ CREATE TABLE model_version (
 
 ### 5.1 test_job - 测试任务
 
-```sql
-CREATE TABLE test_job (
-  id BIGINT NOT NULL AUTO_INCREMENT,
-  user_id BIGINT NOT NULL,
-  model_version_id BIGINT NOT NULL COMMENT '使用的模型版本',
-  dataset_id BIGINT NOT NULL COMMENT '测试数据集',
-  target ENUM('RUL','PCL','BOTH') NOT NULL COMMENT '预测目标',
-  horizon INT NOT NULL DEFAULT 1 COMMENT '预测步长',
-  status ENUM('PENDING','RUNNING','SUCCEEDED','FAILED','CANCELED') NOT NULL DEFAULT 'PENDING',
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  started_at DATETIME NULL,
-  finished_at DATETIME NULL,
-  deleted_at DATETIME NULL COMMENT '软删除时间戳（NULL表示未删除）',
-  PRIMARY KEY (id),
-  KEY idx_test_user (user_id),
-  KEY idx_test_status (status),
-  KEY idx_test_model (model_version_id),
-  KEY idx_test_dataset (dataset_id),
-  KEY idx_test_created (created_at),
-  KEY idx_test_deleted (deleted_at) COMMENT '优化软删除过滤查询',
-  CONSTRAINT fk_test_user FOREIGN KEY (user_id) REFERENCES `user`(id),
-  CONSTRAINT fk_test_model FOREIGN KEY (model_version_id) REFERENCES model_version(id),
-  CONSTRAINT fk_test_dataset FOREIGN KEY (dataset_id) REFERENCES dataset(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试任务（基于模型版本的批量推理评估，支持软删除）';
-```
+建表语句见「SQL 建表语句（汇总）」。
 
 **设计说明**：
 - 一个测试任务使用一个模型版本对指定数据集进行批量推理
@@ -387,16 +475,7 @@ CREATE TABLE test_job (
 
 ### 5.2 test_job_battery - 测试任务电池选择
 
-```sql
-CREATE TABLE test_job_battery (
-  test_job_id BIGINT NOT NULL,
-  battery_id BIGINT NOT NULL,
-  PRIMARY KEY (test_job_id, battery_id),
-  KEY idx_test_battery (battery_id),
-  CONSTRAINT fk_tjb_test FOREIGN KEY (test_job_id) REFERENCES test_job(id),
-  CONSTRAINT fk_tjb_battery FOREIGN KEY (battery_id) REFERENCES battery_unit(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试任务电池选择（可选，用于选择特定电池）';
-```
+建表语句见「SQL 建表语句（汇总）」。
 
 **使用场景**：
 - 用户从数据集中选择特定电池进行测试
@@ -404,19 +483,7 @@ CREATE TABLE test_job_battery (
 
 ### 5.3 test_job_metric_overall - 测试总体指标
 
-```sql
-CREATE TABLE test_job_metric_overall (
-  id BIGINT NOT NULL AUTO_INCREMENT,
-  test_job_id BIGINT NOT NULL,
-  target ENUM('RUL','PCL') NOT NULL,
-  metrics JSON NOT NULL COMMENT '总体指标（RMSPE, MSE, R², MAE等）',
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  UNIQUE KEY uk_test_target (test_job_id, target),
-  KEY idx_metric_test (test_job_id),
-  CONSTRAINT fk_test_metric_job FOREIGN KEY (test_job_id) REFERENCES test_job(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试总体指标（按预测目标）';
-```
+建表语句见「SQL 建表语句（汇总）」。
 
 **metrics JSON 示例**：
 ```json
@@ -431,21 +498,7 @@ CREATE TABLE test_job_metric_overall (
 
 ### 5.4 test_job_battery_metric - 测试分电池指标
 
-```sql
-CREATE TABLE test_job_battery_metric (
-  id BIGINT NOT NULL AUTO_INCREMENT,
-  test_job_id BIGINT NOT NULL,
-  battery_id BIGINT NOT NULL,
-  target ENUM('RUL','PCL') NOT NULL,
-  metrics JSON NOT NULL COMMENT '该电池的指标',
-  PRIMARY KEY (id),
-  UNIQUE KEY uk_test_battery_target (test_job_id, battery_id, target),
-  KEY idx_test_battery_metric (test_job_id),
-  KEY idx_battery_metric (battery_id),
-  CONSTRAINT fk_tbm_test FOREIGN KEY (test_job_id) REFERENCES test_job(id),
-  CONSTRAINT fk_tbm_battery FOREIGN KEY (battery_id) REFERENCES battery_unit(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试分电池指标（用于识别困难样本）';
-```
+建表语句见「SQL 建表语句（汇总）」。
 
 **使用场景**：
 - 快速定位预测效果差的电池
@@ -453,23 +506,7 @@ CREATE TABLE test_job_battery_metric (
 
 ### 5.5 test_job_prediction - 测试预测结果
 
-```sql
-CREATE TABLE test_job_prediction (
-  id BIGINT NOT NULL AUTO_INCREMENT,
-  test_job_id BIGINT NOT NULL,
-  battery_id BIGINT NOT NULL,
-  cycle_num INT NOT NULL COMMENT '循环编号',
-  target ENUM('RUL','PCL') NOT NULL,
-  y_true DOUBLE NULL COMMENT '真实值（离线评估时必填）',
-  y_pred DOUBLE NOT NULL COMMENT '预测值',
-  PRIMARY KEY (id),
-  UNIQUE KEY uk_pred_sample (test_job_id, battery_id, target, cycle_num) COMMENT '每个样本唯一',
-  KEY idx_pred_test (test_job_id),
-  KEY idx_pred_battery (battery_id),
-  CONSTRAINT fk_pred_test FOREIGN KEY (test_job_id) REFERENCES test_job(id),
-  CONSTRAINT fk_pred_battery FOREIGN KEY (battery_id) REFERENCES battery_unit(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试预测结果（逐样本，支持曲线绘制和导出）';
-```
+建表语句见「SQL 建表语句（汇总）」。
 
 **设计说明**：
 - 存储每个样本的预测值和真实值
@@ -478,42 +515,11 @@ CREATE TABLE test_job_prediction (
 
 ### 5.6 test_job_log - 测试日志
 
-```sql
-CREATE TABLE test_job_log (
-  id BIGINT NOT NULL AUTO_INCREMENT,
-  test_job_id BIGINT NOT NULL,
-  user_id BIGINT NOT NULL COMMENT '日志所属用户（数据隔离）',
-  level ENUM('DEBUG','INFO','WARNING','ERROR') NOT NULL,
-  message VARCHAR(2000) NOT NULL,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  KEY idx_test_log (test_job_id),
-  KEY idx_log_user (user_id),
-  KEY idx_test_log_time (test_job_id, created_at) COMMENT '优化按测试任务查询并排序',
-  CONSTRAINT fk_test_log_job FOREIGN KEY (test_job_id) REFERENCES test_job(id),
-  CONSTRAINT fk_test_log_user FOREIGN KEY (user_id) REFERENCES `user`(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试日志';
-```
+建表语句见「SQL 建表语句（汇总）」。
 
 ### 5.7 test_export - 测试结果导出
 
-```sql
-CREATE TABLE test_export (
-  id BIGINT NOT NULL AUTO_INCREMENT,
-  test_job_id BIGINT NOT NULL,
-  user_id BIGINT NOT NULL,
-  format ENUM('CSV','XLSX') NOT NULL,
-  file_path VARCHAR(500) NOT NULL COMMENT '导出文件路径',
-  file_size BIGINT NULL COMMENT '文件大小（字节）',
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  KEY idx_export_test (test_job_id),
-  KEY idx_export_user (user_id),
-  KEY idx_export_created (created_at),
-  CONSTRAINT fk_export_test FOREIGN KEY (test_job_id) REFERENCES test_job(id),
-  CONSTRAINT fk_export_user FOREIGN KEY (user_id) REFERENCES `user`(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试结果导出记录';
-```
+建表语句见「SQL 建表语句（汇总）」。
 
 **存储路径建议**：`data/{user_id}/exports/{test_job_id}/result_{timestamp}.xlsx`
 
@@ -587,7 +593,7 @@ user (用户)
   - 模型：`data/{user_id}/models/{model_version_id}/`
   - 导出：`data/{user_id}/exports/{test_job_id}/`
 
-**6. 分级软删除策略（2026-01-09 新增）**
+**6. 分级软删除策略**
 - **Level 1: 核心资产（软删除）**
   - `data_upload` - 上传审计记录
   - `battery_unit` - 电池元数据
