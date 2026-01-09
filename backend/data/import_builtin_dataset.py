@@ -7,19 +7,18 @@
 """
 
 import sys
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 import h5py
 import numpy as np
 import scipy.io
 
 from src.models import BatteryUnit, CycleData, Dataset, SessionLocal
+
 # 添加项目根目录到路径
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
-
-
 
 
 def load_mat_file(file_path: str):
@@ -217,7 +216,6 @@ def import_dataset():
         print(f"\n❌ 导入失败: {e}")
         import traceback
 
-        import traceback
         traceback.print_exc()
         return False
 
