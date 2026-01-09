@@ -151,7 +151,11 @@ def get_upload_status(
     """查询上传记录的状态"""
     upload = (
         db.query(DataUpload)
-        .filter(DataUpload.id == upload_id, DataUpload.user_id == current_user.id)
+        .filter(
+            DataUpload.id == upload_id,
+            DataUpload.user_id == current_user.id,
+            DataUpload.deleted_at.is_(None),
+        )
         .first()
     )
 
@@ -171,7 +175,7 @@ def list_uploads(
     """获取用户的上传记录列表"""
     uploads = (
         db.query(DataUpload)
-        .filter(DataUpload.user_id == current_user.id)
+        .filter(DataUpload.user_id == current_user.id, DataUpload.deleted_at.is_(None))
         .order_by(DataUpload.created_at.desc())
         .offset(skip)
         .limit(limit)
@@ -193,7 +197,10 @@ def list_datasets(
         Dataset.source_type,
         Dataset.created_at,
         func.count(BatteryUnit.id).label("battery_count"),
-    ).outerjoin(BatteryUnit, Dataset.id == BatteryUnit.dataset_id)
+    ).outerjoin(
+        BatteryUnit,
+        (Dataset.id == BatteryUnit.dataset_id) & (BatteryUnit.deleted_at.is_(None)),
+    )
 
     # 软删除过滤
     query = query.filter(Dataset.deleted_at.is_(None))
@@ -245,7 +252,11 @@ def list_batteries(
     ):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    batteries = db.query(BatteryUnit).filter(BatteryUnit.dataset_id == dataset_id).all()
+    batteries = (
+        db.query(BatteryUnit)
+        .filter(BatteryUnit.dataset_id == dataset_id, BatteryUnit.deleted_at.is_(None))
+        .all()
+    )
     return batteries
 
 
@@ -261,7 +272,11 @@ def get_battery_cycles(
     battery = (
         db.query(BatteryUnit)
         .join(Dataset)
-        .filter(BatteryUnit.id == battery_id, Dataset.deleted_at.is_(None))
+        .filter(
+            BatteryUnit.id == battery_id,
+            BatteryUnit.deleted_at.is_(None),
+            Dataset.deleted_at.is_(None),
+        )
         .first()
     )
     if not battery:
@@ -276,7 +291,7 @@ def get_battery_cycles(
 
     cycles = (
         db.query(CycleData)
-        .filter(CycleData.battery_id == battery_id)
+        .filter(CycleData.battery_id == battery_id, CycleData.deleted_at.is_(None))
         .order_by(CycleData.cycle_num)
         .offset(skip)
         .limit(limit)
@@ -292,17 +307,33 @@ def delete_dataset(
     db: Session = Depends(get_db),
 ):
     """
-    软删除数据集（标记 deleted_at = 当前时间）
+    软删除数据集及其所有关联数据（级联软删除）
 
     限制：
     - 仅允许删除用户自己上传的数据集（source_type='UPLOAD'）
     - 内置数据集（source_type='BUILTIN'）禁止删除
 
-    效果：
+    级联删除范围：
     - dataset 表标记为删除
-    - 所有查询接口自动过滤已删除数据集
-    - 关联数据（battery_unit、training_job 等）通过查询过滤自动隐藏
+    - 关联的 training_job、model_version、test_job、training_job_run 标记为删除
+    - 关联的 battery_unit、cycle_data 标记为删除（核心资产，支持恢复）
+    - 关联的 data_upload 标记为删除（保留审计记录）
+    - 衍生数据（metrics、logs、predictions）物理删除（可重新生成）
     """
+    from src.models import (
+        TestExport,
+        TestJob,
+        TestJobBattery,
+        TestJobBatteryMetric,
+        TestJobLog,
+        TestJobMetricOverall,
+        TestJobPrediction,
+        TrainingJob,
+        TrainingJobBattery,
+        TrainingJobRunLog,
+        TrainingJobRunMetric,
+    )
+
     # 查询数据集（必须未删除）
     dataset = (
         db.query(Dataset)
@@ -323,8 +354,114 @@ def delete_dataset(
     if dataset.owner_user_id != current_user.id:  # type: ignore[arg-type]
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # 软删除：标记 deleted_at
-    dataset.deleted_at = datetime.now(timezone.utc)  # type: ignore[assignment]
+    now = datetime.now(timezone.utc)
+
+    # 1. 获取该数据集下的所有电池 ID（仅未删除的）
+    battery_ids = [b.id for b in dataset.batteries if b.deleted_at is None]
+
+    if battery_ids:
+        # 2. 软删除关联的训练任务
+        training_jobs = (
+            db.query(TrainingJob)
+            .filter(
+                TrainingJob.dataset_id == dataset_id,
+                TrainingJob.deleted_at.is_(None),
+            )
+            .all()
+        )
+
+        for job in training_jobs:
+            job.deleted_at = now  # type: ignore[assignment]
+
+            # 2.1 软删除算法运行记录
+            for run in job.runs:
+                if run.deleted_at is None:
+                    run.deleted_at = now  # type: ignore[assignment]
+
+                # 2.2 软删除模型版本
+                if run.model_version and run.model_version.deleted_at is None:
+                    run.model_version.deleted_at = now  # type: ignore[assignment]
+
+        # 3. 软删除关联的测试任务
+        test_jobs = (
+            db.query(TestJob)
+            .filter(
+                TestJob.dataset_id == dataset_id,
+                TestJob.deleted_at.is_(None),
+            )
+            .all()
+        )
+
+        for test_job in test_jobs:
+            test_job.deleted_at = now  # type: ignore[assignment]
+
+        # 4. 物理删除关联数据（衍生数据，可重新生成）
+        # 4.1 删除训练任务电池关联
+        db.query(TrainingJobBattery).filter(
+            TrainingJobBattery.battery_id.in_(battery_ids)
+        ).delete(synchronize_session=False)
+
+        # 4.2 删除测试任务电池关联
+        db.query(TestJobBattery).filter(
+            TestJobBattery.battery_id.in_(battery_ids)
+        ).delete(synchronize_session=False)
+
+        # 4.3 删除测试任务相关数据（可重新推理）
+        test_job_ids = [tj.id for tj in test_jobs]
+        if test_job_ids:
+            db.query(TestJobMetricOverall).filter(
+                TestJobMetricOverall.test_job_id.in_(test_job_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(TestJobBatteryMetric).filter(
+                TestJobBatteryMetric.test_job_id.in_(test_job_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(TestJobPrediction).filter(
+                TestJobPrediction.test_job_id.in_(test_job_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(TestJobLog).filter(
+                TestJobLog.test_job_id.in_(test_job_ids)
+            ).delete(synchronize_session=False)
+
+            db.query(TestExport).filter(
+                TestExport.test_job_id.in_(test_job_ids)
+            ).delete(synchronize_session=False)
+
+        # 4.4 删除训练任务相关数据（可从checkpoint重新计算）
+        training_job_ids = [tj.id for tj in training_jobs]
+        if training_job_ids:
+            run_ids = [run.id for job in training_jobs for run in job.runs]
+            if run_ids:
+                db.query(TrainingJobRunMetric).filter(
+                    TrainingJobRunMetric.run_id.in_(run_ids)
+                ).delete(synchronize_session=False)
+
+                db.query(TrainingJobRunLog).filter(
+                    TrainingJobRunLog.run_id.in_(run_ids)
+                ).delete(synchronize_session=False)
+
+        # 5. 软删除核心资产（支持恢复）
+        # 5.1 软删除循环数据
+        db.query(CycleData).filter(
+            CycleData.battery_id.in_(battery_ids), CycleData.deleted_at.is_(None)
+        ).update({"deleted_at": now}, synchronize_session=False)
+
+        # 5.2 软删除电池单元
+        db.query(BatteryUnit).filter(
+            BatteryUnit.id.in_(battery_ids), BatteryUnit.deleted_at.is_(None)
+        ).update({"deleted_at": now}, synchronize_session=False)
+
+    # 6. 软删除数据集本身
+    dataset.deleted_at = now  # type: ignore[assignment]
+
+    # 7. 软删除关联的上传记录（保留审计记录）
+    if dataset.upload_id is not None:
+        upload = dataset.upload
+        if upload is not None and upload.deleted_at is None:
+            upload.deleted_at = now  # type: ignore[assignment]
+
     db.commit()
 
     return None

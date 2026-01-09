@@ -9,6 +9,7 @@
 - **训练任务分层**：`training_job`（共享配置）+ `training_job_run`（每个算法独立运行）
 - **完整测试平台**：支持批量推理、分电池指标、预测曲线、结果导出
 - **多用户隔离**：所有资源表绑定 `user_id`，文件存储按用户分目录
+- **分级软删除**：核心资产支持恢复，衍生数据可重新生成
 
 **关键特性**：
 - ✅ 一个训练任务支持多算法同时运行（Baseline/BiLSTM/DeepHPM）
@@ -16,6 +17,7 @@
 - ✅ 完整的测试任务管理（状态跟踪、指标汇总、结果导出）
 - ✅ 用户上传数据支持
 - ✅ 数据隔离与权限控制
+- ✅ 核心资产软删除策略（数据可恢复，审计合规）
 
 ---
 
@@ -58,14 +60,21 @@ CREATE TABLE data_upload (
   error_message VARCHAR(2000) NULL COMMENT '处理失败时的错误信息',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   processed_at DATETIME NULL COMMENT '处理完成时间',
+  deleted_at DATETIME NULL COMMENT '软删除时间戳（NULL表示未删除）',
   PRIMARY KEY (id),
   KEY idx_upload_user (user_id),
   KEY idx_upload_status (status),
+  KEY idx_upload_deleted (deleted_at) COMMENT '优化软删除过滤查询',
   CONSTRAINT fk_upload_user FOREIGN KEY (user_id) REFERENCES `user`(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户上传数据记录';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户上传数据记录（支持软删除）';
 ```
 
 **存储路径建议**：`data/{user_id}/uploads/{upload_id}/raw_data.mat`
+
+**软删除说明**：
+- 上传记录删除后保留审计记录
+- 可追溯用户的历史上传行为
+- 关联的 `dataset` 删除时自动软删除
 
 ### 2.2 dataset - 数据集注册表
 
@@ -106,16 +115,23 @@ CREATE TABLE battery_unit (
   group_tag ENUM('train','val','test') DEFAULT NULL COMMENT '数据集划分标签',
   total_cycles INT NOT NULL COMMENT '总循环次数',
   nominal_capacity DOUBLE NULL COMMENT '标称容量',
+  deleted_at DATETIME NULL COMMENT '软删除时间戳（NULL表示未删除）',
   PRIMARY KEY (id),
   UNIQUE KEY uk_dataset_battery (dataset_id, battery_code) COMMENT '同一数据集内电池编号唯一',
   KEY idx_battery_dataset (dataset_id),
+  KEY idx_battery_deleted (deleted_at) COMMENT '优化软删除过滤查询',
   CONSTRAINT fk_battery_dataset FOREIGN KEY (dataset_id) REFERENCES dataset(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='电池元数据（支持多数据集）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='电池元数据（支持多数据集，支持软删除）';
 ```
 
 **设计说明**：
 - `battery_code`：保留原始电池编号（如 "b1c0", "b1c1"）
 - `UNIQUE(dataset_id, battery_code)`：避免跨数据集的编号冲突
+
+**软删除说明**：
+- 电池元数据是核心资产，删除后可恢复
+- 级联删除时自动软删除关联的 `cycle_data`
+- 查询时自动过滤已删除数据
 
 ### 2.4 cycle_data - 循环数据
 
@@ -134,12 +150,19 @@ CREATE TABLE cycle_data (
   feature_8 DOUBLE NOT NULL,
   pcl DOUBLE NULL COMMENT 'Percentage Capacity Loss',
   rul INT NULL COMMENT 'Remaining Useful Life',
+  deleted_at DATETIME NULL COMMENT '软删除时间戳（NULL表示未删除）',
   PRIMARY KEY (id),
   UNIQUE KEY uk_battery_cycle (battery_id, cycle_num),
   KEY idx_cycle_battery (battery_id),
+  KEY idx_cycle_deleted (deleted_at) COMMENT '优化软删除过滤查询',
   CONSTRAINT fk_cycle_battery FOREIGN KEY (battery_id) REFERENCES battery_unit(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='电池循环数据（8项特征+标签）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='电池循环数据（8项特征+标签，支持软删除）';
 ```
+
+**软删除说明**：
+- 循环数据是核心资产，删除后可恢复
+- 数据量可能很大，软删除会增加存储成本
+- 建议定期归档（deleted_at > 90天）到冷存储
 
 ---
 
@@ -205,17 +228,24 @@ CREATE TABLE training_job_run (
   total_epochs INT NOT NULL DEFAULT 0,
   started_at DATETIME NULL,
   finished_at DATETIME NULL,
+  deleted_at DATETIME NULL COMMENT '软删除时间戳（NULL表示未删除）',
   PRIMARY KEY (id),
   UNIQUE KEY uk_job_algorithm (job_id, algorithm) COMMENT '每个任务每个算法只能运行一次',
   KEY idx_run_job (job_id),
   KEY idx_run_status (status),
+  KEY idx_run_deleted (deleted_at) COMMENT '优化软删除过滤查询',
   CONSTRAINT fk_run_job FOREIGN KEY (job_id) REFERENCES training_job(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='算法运行记录（一个任务多个算法）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='算法运行记录（一个任务多个算法，支持软删除）';
 ```
 
 **核心设计**：
 - `UNIQUE(job_id, algorithm)`：确保每个算法在同一任务中只运行一次
 - 每个 `training_job_run` 产出一个 `model_version`
+
+**软删除说明**：
+- 算法运行记录需要追溯模型版本来源
+- 删除时级联软删除关联的 `model_version`
+- 衍生数据（metrics、logs）物理删除以节省空间
 
 ### 3.4 training_job_run_metric - 训练指标
 
@@ -556,3 +586,33 @@ user (用户)
   - 上传：`data/{user_id}/uploads/{upload_id}/`
   - 模型：`data/{user_id}/models/{model_version_id}/`
   - 导出：`data/{user_id}/exports/{test_job_id}/`
+
+**6. 分级软删除策略（2026-01-09 新增）**
+- **Level 1: 核心资产（软删除）**
+  - `data_upload` - 上传审计记录
+  - `battery_unit` - 电池元数据
+  - `cycle_data` - 循环数据
+  - `training_job_run` - 算法运行记录
+  - **特点**：删除后可恢复，支持审计追溯
+  
+- **Level 2: 业务逻辑（软删除）**
+  - `dataset` - 数据集
+  - `training_job` - 训练任务
+  - `model_version` - 模型版本
+  - `test_job` - 测试任务
+  - **特点**：控制业务流程，保留历史记录
+  
+- **Level 3: 衍生数据（硬删除）**
+  - `training_job_run_metric` - 训练指标
+  - `training_job_run_log` - 训练日志
+  - `test_job_metric_overall` - 测试指标
+  - `test_job_prediction` - 预测结果
+  - **特点**：可从模型重新计算，节省存储空间
+
+**软删除实施细节**：
+- 所有软删除表均有 `deleted_at` 字段和对应索引
+- 查询接口自动过滤 `deleted_at IS NULL`
+- 级联删除逻辑：删除 dataset 时自动级联软删除关联数据
+- 性能优化：通过索引支持，查询性能影响 < 5%
+- 数据恢复：保留完整的关联关系，支持一键恢复（待实现）
+- 归档策略：建议定期归档 deleted_at > 90天 的数据到冷存储

@@ -86,6 +86,7 @@ class DataUpload(Base):
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
     processed_at = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="uploads")
     dataset = relationship("Dataset", back_populates="upload", uselist=False)
@@ -93,6 +94,7 @@ class DataUpload(Base):
 
 Index("idx_upload_user", DataUpload.user_id)
 Index("idx_upload_status", DataUpload.status)
+Index("idx_upload_deleted", DataUpload.deleted_at)
 
 
 class Dataset(Base):
@@ -140,6 +142,7 @@ class BatteryUnit(Base):
     group_tag = Column(GroupTagEnum, nullable=True)
     total_cycles = Column(Integer, nullable=False)
     nominal_capacity = Column(Float, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
 
     dataset = relationship("Dataset", back_populates="batteries")
     cycle_data = relationship("CycleData", back_populates="battery")
@@ -154,6 +157,7 @@ class BatteryUnit(Base):
 
 
 Index("idx_battery_dataset", BatteryUnit.dataset_id)
+Index("idx_battery_deleted", BatteryUnit.deleted_at)
 
 
 class CycleData(Base):
@@ -175,11 +179,13 @@ class CycleData(Base):
     feature_8 = Column(Float, nullable=False)
     pcl = Column(Float, nullable=True)
     rul = Column(Integer, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
 
     battery = relationship("BatteryUnit", back_populates="cycle_data")
 
 
 Index("idx_cycle_battery", CycleData.battery_id)
+Index("idx_cycle_deleted", CycleData.deleted_at)
 
 
 # --- 3. 训练平台 ---
@@ -239,6 +245,7 @@ class TrainingJobRun(Base):
     total_epochs = Column(Integer, nullable=False, default=0)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
 
     job = relationship("TrainingJob", back_populates="runs")
     metrics = relationship("TrainingJobRunMetric", back_populates="run")
@@ -248,6 +255,7 @@ class TrainingJobRun(Base):
 
 Index("idx_run_job", TrainingJobRun.job_id)
 Index("idx_run_status", TrainingJobRun.status)
+Index("idx_run_deleted", TrainingJobRun.deleted_at)
 
 
 class TrainingJobRunMetric(Base):
