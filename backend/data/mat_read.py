@@ -5,9 +5,41 @@ import os
 from numpy.typing import NDArray
 
 # ================= 配置区域 =================
-MAT_FILE = "data/SeversonBattery.mat"  # 替换为你的文件名
+MAT_FILE = "SeversonBattery.mat"  # 替换为你的文件名
 # ===========================================
+import scipy.io as sio
+import pandas as pd
 
+# 读取.mat文件
+mat_data = sio.loadmat("你的电池数据文件.mat")  # 替换为实际文件路径
+
+# 1. 查看.mat文件中的所有变量（找到特征对应的原始变量名）
+print("=== .mat文件中的变量列表 ===")
+for key in mat_data.keys():
+    # 过滤MATLAB默认的系统变量（以__开头）
+    if not key.startswith("__"):
+        print(f"变量名: {key}, 数据形状: {mat_data[key].shape}")
+
+# 2. 提取原始数据（假设核心数据存在"battery_data"变量中）
+# 需根据实际变量名调整，比如可能是"cell_data"/"cycle_data"等
+if "battery_data" in mat_data:
+    raw_data = mat_data["battery_data"]
+    # 转换为DataFrame（如果是二维数组）
+    df_raw = pd.DataFrame(raw_data)
+    print("\n=== 原始.mat数据预览 ===")
+    print(df_raw.head())
+
+# 3. 查找特征定义（关键）
+# 情况1：.mat文件中包含特征名映射（如"feature_names"变量）
+if "feature_names" in mat_data:
+    feature_names = mat_data["feature_names"]
+    # 处理MATLAB字符串数组的格式（可能需要转义）
+    feature_names = [name[0] if isinstance(name, (list, numpy.ndarray)) else name for name in feature_names]
+    print("\n=== 原始特征名 ===")
+    print(feature_names)
+
+# 情况2：如果没有显式特征名，可结合行业规律+数值量级反推
+# 比如：容量（feature_3）、内阻（feature_4）、温度（feature_5）等
 
 def load_and_analyze():
     if not os.path.exists(MAT_FILE):

@@ -18,8 +18,7 @@ import scipy.io
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.models import BatteryUnit, CycleData, Dataset, SessionLocal  # noqa: E402
-
+from backend.src.models import SessionLocal, Dataset, CycleData, BatteryUnit, Base, engine
 
 def load_mat_file(file_path: str):
     """加载.mat文件"""
@@ -38,6 +37,10 @@ def load_mat_file(file_path: str):
 
 def import_dataset():
     """导入内置数据集"""
+
+    # 确保表存在
+    print("正在检查并创建数据库表...")
+    Base.metadata.create_all(bind=engine)
 
     # 数据文件路径
     mat_file = project_root.parent / "power_soh" / "SeversonBattery.mat"

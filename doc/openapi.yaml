@@ -1,0 +1,440 @@
+openapi: 3.0.0
+info:
+  title: Battery Analysis Platform API
+  description: API specification for the Battery Life Analysis and Algorithm Testing Platform.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8000/api
+    description: Local Development Server
+
+paths:
+  # ----------------------------
+  # Dashboard
+  # ----------------------------
+  /dashboard/overview:
+    get:
+      summary: Get system overview statistics
+      description: Returns key metrics for the dashboard.
+      tags:
+        - Dashboard
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStats'
+
+  # ----------------------------
+  # Data Management & Analysis
+  # ----------------------------
+# 1. 获取电池列表（用于顶部下拉框选择）
+  /api/batteries:
+    get:
+      tags: [Analysis]
+      summary: 获取所有电池组列表
+      operationId: get_battery_list
+      responses:
+        '200':
+          description: 成功获取列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      example: "Battery_001"
+                      description: 电池组唯一编号
+                    description:
+                      type: string
+                      example: "一号实验组"
+
+  # 2. 获取8x6统计表格数据
+  /api/batteries/{battery_id}/stats:
+    get:
+      tags: [Analysis]
+      summary: 获取特征统计指标 (8x6表格)
+      description: 返回8个特征的均值、方差、极值以及与RUL/PCL的相关系数
+      parameters:
+        - name: battery_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array # 返回数组，直接给 el-table 使用
+                items:
+                  $ref: '#/components/schemas/FeatureStat'
+
+  # 3. 获取趋势折线图数据
+  /api/batteries/{battery_id}/trend:
+    get:
+      tags: [Analysis]
+      summary: 获取特征趋势数据 (折线图)
+      description: 根据选择的特征名称，返回随循环次数变化的时序数据
+      parameters:
+        - name: battery_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: feature_name
+          in: query
+          required: true
+          description: 要查询的特征名 (如 feature_1, feature_2)
+          schema:
+            type: string
+            enum: [feature_1, feature_2, feature_3, feature_4, feature_5, feature_6, feature_7, feature_8]
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrendData'
+
+  # 4. 获取 RUL 散点图数据
+  /api/batteries/{battery_id}/scatter:
+    get:
+      tags: [Analysis]
+      summary: 获取 RUL 关联分析数据 (散点图)
+      description: 获取指定特征与 RUL 的对应关系数据
+      parameters:
+        - name: battery_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: feature_name
+          in: query
+          required: true
+          description: X轴使用的特征 (默认推荐相关性最高的)
+          schema:
+            type: string
+            default: feature_1
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  points:
+                    type: array
+                    description: 二维数组 [[feature_val, rul], ...] 适配 ECharts series.data
+                    items:
+                      type: array
+                      minItems: 2
+                      maxItems: 2
+                      items:
+                        type: number
+                    example: [[3.6, 1000], [3.59, 999]]
+
+  # 5. 获取 PCL 分布数据 (直方图)
+  /api/batteries/{battery_id}/pcl-distribution:
+    get:
+      tags: [Analysis]
+      summary: 获取 PCL 分布直方图数据
+      description: 返回该电池所有循环的 PCL 值列表，由前端 ECharts 进行直方图分箱计算
+      parameters:
+        - name: battery_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pcl_values:
+                    type: array
+                    items:
+                      type: number
+                    example: [0.01, 0.012, 0.015, 0.02]
+
+  # 6. 获取相关性矩阵 (热力图)
+  /api/batteries/{battery_id}/correlation-matrix:
+    get:
+      tags: [Analysis]
+      summary: 获取多特征相关性矩阵 (热力图)
+      description: 返回 8x8 的相关系数矩阵
+      parameters:
+        - name: battery_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  features:
+                    type: array
+                    items:
+                      type: string
+                    example: ["feature_1", "feature_2", "..."]
+                  matrix:
+                    type: array
+                    description: 8x8 二维数组，matrix[i][j] 代表 feature_i 和 feature_j 的相关系数
+                    items:
+                      type: array
+                      items:
+                        type: number
+                    example: [[1.0, 0.8], [0.8, 1.0]]
+
+  # ----------------------------
+  # Algorithm Training
+  # ----------------------------
+  /training/train:
+    post:
+      summary: Start a new training job
+      tags:
+        - Training
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrainingConfig'
+      responses:
+        '200':
+          description: Training started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                  status:
+                    type: string
+
+  /training/status/{job_id}:
+    get:
+      summary: Get training job status
+      tags:
+        - Training
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Current status and logs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingStatus'
+
+  # ----------------------------
+  # Prediction
+  # ----------------------------
+  /models:
+    get:
+      summary: Get list of available trained models
+      tags:
+        - Prediction
+      responses:
+        '200':
+          description: List of models
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModelInfo'
+
+  /prediction/predict:
+    post:
+      summary: Run prediction task
+      tags:
+        - Prediction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                battery_id:
+                  type: string
+                model_id:
+                  type: string
+      responses:
+        '200':
+          description: Prediction results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictionResult'
+
+components:
+  schemas:
+    # --- Dashboard ---
+    DashboardStats:
+      type: object
+      properties:
+        battery_count:
+          type: integer
+          example: 124
+        trained_models:
+          type: integer
+          example: 12
+        avg_rul:
+          type: string
+          example: "850 Cycles"
+        alarm_count:
+          type: integer
+          example: 3
+
+    # --- Data Analysis ---
+    FeatureStat:
+      type: object
+      properties:
+        feature_name:
+          type: string
+          example: "feature_1"
+        mean:
+          type: number
+          format: float
+          example: 3.65
+        variance:
+          type: number
+          format: float
+          example: 0.02
+        min_val:
+          type: number
+          format: float
+          example: 2.8
+        max_val:
+          type: number
+          format: float
+          example: 4.2
+        corr_rul:
+          type: number
+          format: float
+          description: 与剩余寿命的相关系数
+          example: 0.85
+        corr_pcl:
+          type: number
+          format: float
+          description: 与容量衰减的相关系数
+          example: 0.82
+
+    TrendData:
+      type: object
+      properties:
+        cycles:
+          type: array
+          description: X轴数据 (循环次数)
+          items:
+            type: integer
+          example: [1, 2, 3, 4, 5]
+        values:
+          type: array
+          description: Y轴数据 (特征值)
+          items:
+            type: number
+          example: [3.60, 3.59, 3.58, 3.57, 3.56]
+
+    # --- Training ---
+    TrainingConfig:
+      type: object
+      properties:
+        model:
+          type: string
+          enum: [Baseline, BiLSTM, DeepHPM]
+        epochs:
+          type: integer
+          default: 100
+        batch_size:
+          type: integer
+          default: 32
+        learning_rate:
+          type: number
+          default: 0.001
+        optimizer:
+          type: string
+          enum: [Adam, SGD, RMSprop]
+        split_ratio:
+          type: number
+          default: 0.8
+
+    TrainingStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        logs:
+          type: array
+          items:
+            type: string
+        metrics: # Final or current metrics
+          type: object
+          properties:
+            loss:
+              type: number
+            rmspe:
+              type: number
+            mse:
+              type: number
+            r2:
+              type: number
+
+    # --- Prediction ---
+    ModelInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    PredictionResult:
+      type: object
+      properties:
+        rul_prediction:
+          type: array
+          items:
+            type: number
+        rul_actual:
+          type: array
+          items:
+            type: number
+        pcl_prediction:
+          type: array
+          items:
+            type: number
+        pcl_actual:
+          type: array
+          items:
+            type: number
