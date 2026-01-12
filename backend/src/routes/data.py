@@ -241,7 +241,9 @@ def list_batteries(
 
     # MVP: 仅支持内置数据集，所有认证用户可访问
     if str(dataset.source_type) != "BUILTIN":
-        raise HTTPException(status_code=403, detail="Only built-in datasets are supported in MVP")
+        raise HTTPException(
+            status_code=403, detail="Only built-in datasets are supported in MVP"
+        )
 
     batteries = (
         db.query(BatteryUnit)
@@ -275,7 +277,9 @@ def get_battery_cycles(
 
     # MVP: 仅支持内置数据集，所有认证用户可访问
     if str(battery.dataset.source_type) != "BUILTIN":
-        raise HTTPException(status_code=403, detail="Only built-in datasets are supported in MVP")
+        raise HTTPException(
+            status_code=403, detail="Only built-in datasets are supported in MVP"
+        )
 
     cycles = (
         db.query(CycleData)

@@ -4,7 +4,6 @@
 提供与 functions.SeversonBattery 兼容的数据结构
 """
 
-
 import numpy as np
 import torch
 from sqlalchemy.orm import Session

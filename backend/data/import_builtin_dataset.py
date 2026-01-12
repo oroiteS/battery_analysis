@@ -13,13 +13,12 @@ from pathlib import Path
 import h5py
 import numpy as np
 import scipy.io
-# 添加项目根目录到路径（必须在导入 src 模块之前）
-project_root = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(project_root))
 
 from src.models import SessionLocal, Dataset, CycleData, BatteryUnit, Base, engine
 
-
+# 添加项目根目录到路径（必须在导入 src 模块之前）
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
 
 
 def load_mat_file(file_path: str):
