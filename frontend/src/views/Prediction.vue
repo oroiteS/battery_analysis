@@ -4,7 +4,9 @@ import * as echarts from 'echarts'
 
 const predictForm = ref({
   batteryId: '',
-  modelId: ''
+  modelId: '',
+  step: 10,
+  target: 'RUL'
 })
 
 const batteryOptions = Array.from({ length: 124 }, (_, i) => ({
@@ -46,7 +48,7 @@ const handlePredict = () => {
           </el-select>
         </el-form-item>
         <el-form-item label="预测模型">
-          <el-select v-model="predictForm.modelId" placeholder="选择模型">
+          <el-select v-model="predictForm.modelId" placeholder="选择模型" filterable>
              <el-option
               v-for="item in modelOptions"
               :key="item.value"
@@ -55,6 +57,22 @@ const handlePredict = () => {
             />
           </el-select>
         </el-form-item>
+        <el-form-item label="选择步长">
+          <el-input-number
+            v-model="predictForm.step"
+            :min="1"
+            :max="500"
+            :step="1"
+          />
+        </el-form-item>
+        <el-form-item label="预测目标">
+          <el-radio-group v-model="predictForm.target">
+            <el-radio label="RUL">RUL</el-radio>
+            <el-radio label="PCL">PCL</el-radio>
+            <el-radio label="RUL+PCL">RUL+PCL</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        
         <el-form-item>
           <el-button type="primary" icon="VideoPlay" :loading="isPredicting" @click="handlePredict">
             开始预测
