@@ -1,10 +1,10 @@
 import pandas as pd
-from typing import List, Dict, Any
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from src.models import get_db, CycleData, BatteryUnit
+from src.models import get_db, CycleData
 from src.routes.auth import get_current_user
 from src.models import User
 

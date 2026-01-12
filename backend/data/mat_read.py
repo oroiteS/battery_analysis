@@ -1,14 +1,13 @@
 import scipy.io
 import numpy as np
-import pandas as pd
 import os
 from numpy.typing import NDArray
-
+import scipy.io as sio
+import pandas as pd
 # ================= 配置区域 =================
 MAT_FILE = "SeversonBattery.mat"  # 替换为你的文件名
 # ===========================================
-import scipy.io as sio
-import pandas as pd
+
 
 # 读取.mat文件
 mat_data = sio.loadmat("你的电池数据文件.mat")  # 替换为实际文件路径
@@ -34,7 +33,7 @@ if "battery_data" in mat_data:
 if "feature_names" in mat_data:
     feature_names = mat_data["feature_names"]
     # 处理MATLAB字符串数组的格式（可能需要转义）
-    feature_names = [name[0] if isinstance(name, (list, numpy.ndarray)) else name for name in feature_names]
+    feature_names = [name[0] if isinstance(name, (list, np.ndarray)) else name for name in feature_names]
     print("\n=== 原始特征名 ===")
     print(feature_names)
 
