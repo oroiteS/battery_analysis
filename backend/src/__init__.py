@@ -3,9 +3,10 @@ from contextlib import asynccontextmanager
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from src.config import settings
-from src.routes import api_router
 from src.models import Base, engine
+from src.routes import api_router
 
 logger = logging.getLogger("uvicorn")
 

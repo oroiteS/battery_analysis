@@ -13,12 +13,12 @@ from pathlib import Path
 import h5py
 import numpy as np
 import scipy.io
+from src.models import SessionLocal, Dataset, CycleData, BatteryUnit, Base, engine
 
 # 添加项目根目录到路径（必须在导入 src 模块之前）
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.models import BatteryUnit, CycleData, Dataset, SessionLocal  # noqa: E402
 
 
 def load_mat_file(file_path: str):
@@ -38,6 +38,10 @@ def load_mat_file(file_path: str):
 
 def import_dataset():
     """导入内置数据集"""
+
+    # 确保表存在
+    print("正在检查并创建数据库表...")
+    Base.metadata.create_all(bind=engine)
 
     # 数据文件路径
     mat_file = project_root.parent / "power_soh" / "SeversonBattery.mat"
