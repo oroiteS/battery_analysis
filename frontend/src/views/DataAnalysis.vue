@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import * as echarts from 'echarts'
+import LineChart from '../components/charts/LineChart.vue'
+import ScatterChart from '../components/charts/ScatterChart.vue'
+import HistogramChart from '../components/charts/HistogramChart.vue'
+import HeatmapChart from '../components/charts/HeatmapChart.vue'
 
 const batteryId = ref('')
 const batteryOptions = Array.from({ length: 124 }, (_, i) => ({
@@ -8,127 +11,94 @@ const batteryOptions = Array.from({ length: 124 }, (_, i) => ({
   label: `电池组 B${String(i + 1).padStart(4, '0')}`
 }))
 
-// Mock Data
-const statsData = ref([
-  { label: '电压均值', value: '3.65 V' },
-  { label: '电流均值', value: '1.2 A' },
-  { label: '最高温度', value: '42 °C' },
-  { label: '循环次数', value: '1200' },
-])
+// Feature selection for Line Chart
+const selectedFeature = ref('feature_1')
+const featureOptions = Array.from({ length: 8 }, (_, i) => ({
+  value: `feature_${i + 1}`,
+  label: `Feature ${i + 1}`
+}))
+
+// --- Mock Data ---
+
+// 1. Statistical Table Data
+const tableData = ref(Array.from({ length: 8 }, (_, i) => ({
+  name: `feature_${i + 1}`,
+  mean: (Math.random() * 10).toFixed(2),
+  variance: (Math.random() * 2).toFixed(2),
+  min: (Math.random() * 5).toFixed(2),
+  max: (Math.random() * 15).toFixed(2),
+  r2_rul: (Math.random() * 2 - 1).toFixed(3), // -1 to 1
+  r2_pcl: (Math.random() * 2 - 1).toFixed(3)
+})))
+
+// 2. Line Chart Data (Trend)
+const lineChartData = ref<number[]>([])
+const lineChartXAxis = ref<string[]>([])
+
+// 3. Scatter Chart Data (RUL)
+const scatterChartData = ref<number[][]>([])
+
+// 4. Histogram Data (PCL)
+const histData = ref<number[]>([12, 30, 45, 20, 17])
+const histCategories = ['0-10%', '10-20%', '20-30%', '30-40%', '>40%']
+
+// 5. Heatmap Data (Correlation)
+const heatmapData = ref<number[][]>([])
+const heatmapLabels = Array.from({ length: 8 }, (_, i) => `F${i + 1}`)
 
 const handleSearch = () => {
-  // TODO: Fetch data from API
+  // TODO: Fetch real data based on batteryId
   console.log('Searching for battery:', batteryId.value)
+  // Simulate data refresh
+  generateMockData()
 }
 
-// Chart Refs
-const lineChartRef = ref(null)
-const scatterChartRef = ref(null)
-const histChartRef = ref(null)
-const heatmapChartRef = ref(null)
+const handleFeatureChange = () => {
+  // Update line chart data based on selected feature
+  // Mocking update:
+  lineChartData.value = Array.from({ length: 50 }, () => Math.random() * 10)
+}
+
+const generateMockData = () => {
+  // Line Chart
+  lineChartXAxis.value = Array.from({ length: 50 }, (_, i) => `${i * 20}`)
+  lineChartData.value = Array.from({ length: 50 }, () => Math.random() * 10)
+
+  // Scatter Chart
+  scatterChartData.value = Array.from({ length: 50 }, () => [Math.random() * 5, Math.random() * 1000])
+
+  // Heatmap
+  const data: number[][] = []
+  for (let i = 0; i < 8; i++) {
+    for (let j = 0; j < 8; j++) {
+      data.push([i, j, parseFloat((Math.random() * 2 - 1).toFixed(2))])
+    }
+  }
+  heatmapData.value = data
+}
+
+// Utility for conditional formatting
+const getCorrelationStyle = (value: string) => {
+  const num = parseFloat(value)
+  if (Math.abs(num) > 0.7) {
+    return { color: '#F56C6C', fontWeight: 'bold' } // Red for high correlation
+  }
+  return {}
+}
 
 onMounted(() => {
-  // Initialize charts (mock)
-  initCharts()
+  generateMockData()
 })
-
-const initCharts = () => {
-  if (lineChartRef.value) {
-    const chart = echarts.init(lineChartRef.value)
-    chart.setOption({
-      title: { text: '特征参数随循环次数变化' },
-      tooltip: { trigger: 'axis' },
-      legend: { data: ['电压', '电流', '温度'] },
-      grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-      xAxis: { type: 'category', data: ['0', '200', '400', '600', '800', '1000', '1200'] },
-      yAxis: { type: 'value' },
-      series: [
-        { data: [3.8, 3.75, 3.7, 3.65, 3.6, 3.55, 3.5], type: 'line', name: '电压', smooth: true },
-        { data: [1.2, 1.2, 1.2, 1.2, 1.2, 1.2, 1.2], type: 'line', name: '电流', smooth: true },
-        { data: [25, 26, 28, 30, 35, 38, 42], type: 'line', name: '温度', yAxisIndex: 0, smooth: true }
-      ]
-    })
-    window.addEventListener('resize', () => chart.resize())
-  }
-
-  if (scatterChartRef.value) {
-    const chart = echarts.init(scatterChartRef.value)
-    chart.setOption({
-      title: { text: 'RUL 与 电压 相关性' },
-      tooltip: { trigger: 'item' },
-      xAxis: { name: '电压 (V)', type: 'value', scale: true },
-      yAxis: { name: 'RUL (Cycles)', type: 'value', scale: true },
-      series: [{
-        symbolSize: 10,
-        data: [
-          [3.8, 1200], [3.75, 1000], [3.7, 800], [3.65, 600], [3.6, 400], [3.55, 200], [3.5, 0]
-        ],
-        type: 'scatter'
-      }]
-    })
-    window.addEventListener('resize', () => chart.resize())
-  }
-
-  if (histChartRef.value) {
-    const chart = echarts.init(histChartRef.value)
-    chart.setOption({
-      title: { text: 'PCL 分布情况' },
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: ['0-10%', '10-20%', '20-30%', '30-40%', '>40%'] },
-      yAxis: { type: 'value' },
-      series: [{
-        data: [12, 30, 45, 20, 17],
-        type: 'bar',
-        itemStyle: { color: '#409EFF' }
-      }]
-    })
-    window.addEventListener('resize', () => chart.resize())
-  }
-
-  if (heatmapChartRef.value) {
-    const chart = echarts.init(heatmapChartRef.value)
-    const hours = ['电压', '电流', '温度', 'RUL', 'PCL'];
-    const days = ['电压', '电流', '温度', 'RUL', 'PCL'];
-    const data = [
-      [0, 0, 1], [0, 1, 0.1], [0, 2, 0.2], [0, 3, 0.8], [0, 4, 0.7],
-      [1, 0, 0.1], [1, 1, 1], [1, 2, 0.3], [1, 3, 0.1], [1, 4, 0.1],
-      [2, 0, 0.2], [2, 1, 0.3], [2, 2, 1], [2, 3, -0.5], [2, 4, -0.4],
-      [3, 0, 0.8], [3, 1, 0.1], [3, 2, -0.5], [3, 3, 1], [3, 4, 0.9],
-      [4, 0, 0.7], [4, 1, 0.1], [4, 2, -0.4], [4, 3, 0.9], [4, 4, 1]
-    ].map(function (item) {
-      return [item[1], item[0], item[2] || '-'];
-    });
-
-    chart.setOption({
-      title: { text: '特征相关性矩阵' },
-      tooltip: { position: 'top' },
-      grid: { height: '50%', top: '10%' },
-      xAxis: { type: 'category', data: hours, splitArea: { show: true } },
-      yAxis: { type: 'category', data: days, splitArea: { show: true } },
-      visualMap: {
-        min: -1, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: '15%'
-      },
-      series: [{
-        name: 'Correlation',
-        type: 'heatmap',
-        data: data,
-        label: { show: true },
-        emphasis: {
-          itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0, 0, 0, 0.5)' }
-        }
-      }]
-    })
-    window.addEventListener('resize', () => chart.resize())
-  }
-}
 </script>
 
 <template>
   <div class="analysis-container">
-    <el-card shadow="hover" class="filter-card">
-      <el-form :inline="true">
-        <el-form-item label="电池组编号">
-          <el-select v-model="batteryId" placeholder="请选择电池组" style="width: 200px" filterable>
+    <!-- 1. Top Header Controls -->
+    <el-card shadow="hover" class="header-card">
+      <div class="header-content">
+        <div class="left-panel">
+          <span class="label">电池组编号：</span>
+          <el-select v-model="batteryId" placeholder="请选择电池组" style="width: 240px" filterable @change="handleSearch">
             <el-option
               v-for="item in batteryOptions"
               :key="item.value"
@@ -136,47 +106,90 @@ const initCharts = () => {
               :value="item.value"
             />
           </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" icon="Search" @click="handleSearch">查询分析</el-button>
-        </el-form-item>
-      </el-form>
+        </div>
+        <div class="right-panel">
+          <el-button type="primary" icon="Download">导出分析报告</el-button>
+        </div>
+      </div>
     </el-card>
 
+    <!-- 2. Statistical Overview Table -->
+    <el-card shadow="hover" class="mt-20" header="特征统计概览">
+      <el-table :data="tableData" border stripe style="width: 100%">
+        <el-table-column prop="name" label="特征名称" width="180" />
+        <el-table-column prop="mean" label="均值 (Mean)" />
+        <el-table-column prop="variance" label="方差 (Variance)" />
+        <el-table-column prop="min" label="最小值 (Min)" />
+        <el-table-column prop="max" label="最大值 (Max)" />
+        <el-table-column label="与 RUL 相关性 (R²)">
+          <template #default="scope">
+            <span :style="getCorrelationStyle(scope.row.r2_rul)">
+              {{ scope.row.r2_rul }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="与 PCL 相关性 (R²)">
+           <template #default="scope">
+            <span :style="getCorrelationStyle(scope.row.r2_pcl)">
+              {{ scope.row.r2_pcl }}
+            </span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <!-- 3. Visualization Dashboard -->
     <el-row :gutter="20" class="mt-20">
-      <el-col :span="24">
-        <el-card shadow="hover" header="统计指标">
-          <el-descriptions border>
-            <el-descriptions-item v-for="item in statsData" :key="item.label" :label="item.label">
-              {{ item.value }}
-            </el-descriptions-item>
-          </el-descriptions>
+      <!-- Top-Left: Trend Analysis -->
+      <el-col :span="12">
+        <el-card shadow="hover" class="chart-card">
+          <template #header>
+            <div class="card-header">
+              <span>特征趋势分析(各特征随循环次数的变化)</span>
+              <el-select v-model="selectedFeature" size="small" style="width: 120px" @change="handleFeatureChange">
+                <el-option v-for="opt in featureOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+              </el-select>
+            </div>
+          </template>
+          <LineChart 
+            :data="lineChartData" 
+            :x-axis-data="lineChartXAxis" 
+            y-axis-name="Value"
+          />
+        </el-card>
+      </el-col>
+
+      <!-- Top-Right: RUL Scatter -->
+      <el-col :span="12">
+        <el-card shadow="hover" class="chart-card" header="RUL 关键因子分析 (Top Feature vs RUL)">
+           <ScatterChart 
+            :data="scatterChartData"
+            x-axis-name="Feature Value"
+            y-axis-name="RUL (Cycles)"
+           />
         </el-card>
       </el-col>
     </el-row>
 
     <el-row :gutter="20" class="mt-20">
+      <!-- Bottom-Left: PCL Distribution -->
       <el-col :span="12">
-        <el-card shadow="hover">
-          <div ref="lineChartRef" style="height: 300px;"></div>
+        <el-card shadow="hover" class="chart-card" header="容量衰减分布 (PCL Distribution)">
+          <HistogramChart 
+            :data="histData"
+            :categories="histCategories"
+          />
         </el-card>
       </el-col>
-      <el-col :span="12">
-        <el-card shadow="hover">
-          <div ref="scatterChartRef" style="height: 300px;"></div>
-        </el-card>
-      </el-col>
-    </el-row>
 
-    <el-row :gutter="20" class="mt-20">
+      <!-- Bottom-Right: Correlation Heatmap -->
       <el-col :span="12">
-        <el-card shadow="hover">
-          <div ref="histChartRef" style="height: 300px;"></div>
-        </el-card>
-      </el-col>
-      <el-col :span="12">
-        <el-card shadow="hover">
-          <div ref="heatmapChartRef" style="height: 300px;"></div>
+        <el-card shadow="hover" class="chart-card" header="多特征相关性矩阵">
+          <HeatmapChart 
+            :data="heatmapData"
+            :x-labels="heatmapLabels"
+            :y-labels="heatmapLabels"
+          />
         </el-card>
       </el-col>
     </el-row>
@@ -186,5 +199,33 @@ const initCharts = () => {
 <style scoped>
 .mt-20 {
   margin-top: 20px;
+}
+.header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.label {
+  margin-right: 10px;
+  font-weight: bold;
+  color: #606266;
+}
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.chart-card {
+  height: 420px; /* Fixed height for consistency */
+  display: flex;
+  flex-direction: column;
+}
+/* Ensure chart components take available height */
+:deep(.el-card__body) {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
 }
 </style>

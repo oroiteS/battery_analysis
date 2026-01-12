@@ -6,7 +6,7 @@ const predictForm = ref({
   batteryId: '',
   modelId: '',
   step: 10,
-  target: 'RUL'
+  // target: 'RUL'
 })
 
 const batteryOptions = Array.from({ length: 124 }, (_, i) => ({
@@ -65,13 +65,13 @@ const handlePredict = () => {
             :step="1"
           />
         </el-form-item>
-        <el-form-item label="预测目标">
+        <!-- <el-form-item label="预测目标">
           <el-radio-group v-model="predictForm.target">
             <el-radio label="RUL">RUL</el-radio>
             <el-radio label="PCL">PCL</el-radio>
             <el-radio label="RUL+PCL">RUL+PCL</el-radio>
           </el-radio-group>
-        </el-form-item>
+        </el-form-item> -->
         
         <el-form-item>
           <el-button type="primary" icon="VideoPlay" :loading="isPredicting" @click="handlePredict">
