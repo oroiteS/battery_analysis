@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import scipy.io
 
-from src.models import BatteryUnit, CycleData, Dataset, DataUpload, SessionLocal
+from backend.src.models import BatteryUnit, CycleData, Dataset, DataUpload, SessionLocal
 
 
 class ParseError(Exception):

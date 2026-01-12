@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from src.models import (
+from backend.src.models import (
     BatteryUnit,
     CycleData,
     Dataset,
@@ -17,8 +17,9 @@ from src.models import (
     User,
     get_db,
 )
-from src.routes.auth import get_current_user
-from src.tasks.parse_upload import parse_uploaded_file
+from backend.src.tasks.parse_upload import parse_uploaded_file
+
+from backend.src.routes.auth import get_current_user
 
 router = APIRouter()
 
@@ -93,7 +94,7 @@ async def upload_data(
 
     上传后状态为 PENDING，后台异步解析，可通过 GET /uploads/{upload_id} 查询状态
     """
-    from src.config import settings
+    from backend.src.config import settings
 
     # 验证文件格式
     allowed_extensions = {".mat", ".csv", ".xlsx", ".xls"}
@@ -320,7 +321,7 @@ def delete_dataset(
     - 关联的 data_upload 标记为删除（保留审计记录）
     - 衍生数据（metrics、logs、predictions）物理删除（可重新生成）
     """
-    from src.models import (
+    from backend.src.models import (
         TestExport,
         TestJob,
         TestJobBattery,

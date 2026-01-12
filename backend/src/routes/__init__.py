@@ -1,7 +1,7 @@
 # /src/routes/__init__.py
 from fastapi import APIRouter
 
-from src.routes import auth, data
+from backend.src.routes import auth, data
 
 api_router = APIRouter()
 # 聚合各个业务模块

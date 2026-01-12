@@ -9,8 +9,8 @@ from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
-from src.config import settings
-from src.models import User, get_db
+from backend.src.config import settings
+from backend.src.models import User, get_db
 
 router = APIRouter()
 

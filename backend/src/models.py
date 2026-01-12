@@ -19,7 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
-from src.config import settings
+from backend.src.config import settings
 
 # --- 数据库连接 ---
 engine = create_engine(
