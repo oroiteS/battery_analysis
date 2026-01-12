@@ -18,7 +18,7 @@ import scipy.io
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-from backend.src.models import SessionLocal, Dataset, CycleData, BatteryUnit, Base, engine
+from src.models import SessionLocal, Dataset, CycleData, BatteryUnit, Base, engine
 
 def load_mat_file(file_path: str):
     """加载.mat文件"""

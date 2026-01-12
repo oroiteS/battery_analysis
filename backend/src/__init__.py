@@ -4,9 +4,9 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.src.config import settings
-from backend.src.models import Base, engine
-from backend.src.routes import api_router
+from src.config import settings
+from src.models import Base, engine
+from src.routes import api_router
 
 logger = logging.getLogger("uvicorn")
 

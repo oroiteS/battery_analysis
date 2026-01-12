@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from backend.src.models import get_db, CycleData, BatteryUnit
-from backend.src.routes.auth import get_current_user
-from backend.src.models import User
+from src.models import get_db, CycleData, BatteryUnit
+from src.routes.auth import get_current_user
+from src.models import User
 
 # 定义 Pydantic 响应模型 (与 OpenAPI 对应)
 from pydantic import BaseModel
