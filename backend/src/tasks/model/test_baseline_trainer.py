@@ -97,8 +97,8 @@ def test_baseline_trainer():
 
         results = train_baseline_from_database(
             db=db,
-            battery_ids_train=battery_ids_train, # type: ignore
-            battery_ids_test=battery_ids_test, # type: ignore
+            battery_ids_train=battery_ids_train,  # type: ignore
+            battery_ids_test=battery_ids_test,  # type: ignore
             config=config,
             callbacks=callbacks,
         )

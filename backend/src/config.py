@@ -45,7 +45,7 @@ class Settings:
             # 在开发环境中，如果未设置或太短，可以给一个警告而不是报错，或者使用默认值
             # 但为了安全起见，生产环境应该强制要求
             if self.ENV == "production":
-                 raise ValueError(
+                raise ValueError(
                     "SECRET_KEY must be at least 32 characters long. "
                     "Set a strong SECRET_KEY in your .env file."
                 )
@@ -60,7 +60,7 @@ class Settings:
             port = int(self.DB_PORT)
         except ValueError:
             port = 3306
-            
+
         return f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{port}/{self.DB_NAME}"
 
 
