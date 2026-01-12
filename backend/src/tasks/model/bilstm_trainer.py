@@ -60,24 +60,24 @@ class BiLSTMModel(nn.Module):
 
 @dataclass
 class BiLSTMTrainingConfig:
-    """BiLSTM 训练配置"""
+    """BiLSTM 训练配置（基于预训练模型参数）"""
 
     # 数据参数
     seq_len: int = 1
     perc_val: float = 0.2
 
-    # 模型参数
+    # 模型参数（来自预训练模型）
     num_layers: int = 2  # BiLSTM 使用单个整数而非列表
-    hidden_dim: int = 100  # 隐藏层维度
+    hidden_dim: int = 128  # 隐藏层维度，对应预训练的 num_neurons
     dropout_rate: float = 0.2
 
-    # 训练参数
-    num_epoch: int = 500
-    batch_size: int = 32
+    # 训练参数（来自预训练模型）
+    num_epoch: int = 2000
+    batch_size: int = 1024
     lr: float = 0.001
     weight_decay: float = 0.0
-    step_size: int = 100
-    gamma: float = 0.5
+    step_size: int = 50000
+    gamma: float = 0.1
     lr_scheduler: str = "StepLR"  # StepLR/CosineAnnealing/ReduceLROnPlateau
     min_lr: float = 1e-6
     grad_clip: float = 0.0
@@ -86,8 +86,8 @@ class BiLSTMTrainingConfig:
     early_stopping_patience: int = 0  # 0表示禁用
     monitor_metric: str = "val_loss"  # val_loss/RMSPE
 
-    # 实验参数
-    num_rounds: int = 1
+    # 实验参数（来自预训练模型）
+    num_rounds: int = 5
     random_seed: int = 1234
 
     # 设备

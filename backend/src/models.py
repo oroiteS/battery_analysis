@@ -279,13 +279,14 @@ Index("idx_metric_run", TrainingJobRunMetric.run_id)
 
 
 class TrainingJobRunLog(Base):
+    """训练日志文件路径（每个运行一条记录）"""
+
     __tablename__ = "training_job_run_log"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     run_id = Column(BigInteger, ForeignKey("training_job_run.id"), nullable=False)
     user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False)
-    level = Column(LogLevelEnum, nullable=False)
-    message = Column(String(2000), nullable=False)
+    log_file_path = Column(String(500), nullable=False)  # 日志文件路径
     created_at = Column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -293,9 +294,7 @@ class TrainingJobRunLog(Base):
     run = relationship("TrainingJobRun", back_populates="logs")
 
 
-Index("idx_log_run", TrainingJobRunLog.run_id)
 Index("idx_log_user", TrainingJobRunLog.user_id)
-Index("idx_log_run_time", TrainingJobRunLog.run_id, TrainingJobRunLog.created_at)
 
 
 # --- 4. 模型版本管理 ---
@@ -449,13 +448,14 @@ Index("idx_pred_battery", TestJobPrediction.battery_id)
 
 
 class TestJobLog(Base):
+    """测试日志文件路径（每个测试任务一条记录）"""
+
     __tablename__ = "test_job_log"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     test_job_id = Column(BigInteger, ForeignKey("test_job.id"), nullable=False)
     user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False)
-    level = Column(LogLevelEnum, nullable=False)
-    message = Column(String(2000), nullable=False)
+    log_file_path = Column(String(500), nullable=False)  # 日志文件路径
     created_at = Column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -463,9 +463,7 @@ class TestJobLog(Base):
     test_job = relationship("TestJob", back_populates="logs")
 
 
-Index("idx_test_log", TestJobLog.test_job_id)
 Index("idx_log_user", TestJobLog.user_id)
-Index("idx_test_log_time", TestJobLog.test_job_id, TestJobLog.created_at)
 
 
 class TestExport(Base):

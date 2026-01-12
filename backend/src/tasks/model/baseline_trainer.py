@@ -25,24 +25,24 @@ from src.utils.training_utils import (
 
 @dataclass
 class BaselineTrainingConfig:
-    """Baseline 训练配置"""
+    """Baseline 训练配置（基于预训练模型参数）"""
 
     # 数据参数
     seq_len: int = 1
     perc_val: float = 0.2
 
-    # 模型参数
-    num_layers: list[int] = field(default_factory=lambda: [2, 3])
-    num_neurons: list[int] = field(default_factory=lambda: [100, 150])
+    # 模型参数（来自预训练模型）
+    num_layers: list[int] = field(default_factory=lambda: [2])
+    num_neurons: list[int] = field(default_factory=lambda: [128])
     dropout_rate: float = 0.2
 
-    # 训练参数
-    num_epoch: int = 500
-    batch_size: int = 32
+    # 训练参数（来自预训练模型）
+    num_epoch: int = 2000
+    batch_size: int = 1024
     lr: float = 0.001
     weight_decay: float = 0.0
-    step_size: int = 100
-    gamma: float = 0.5
+    step_size: int = 50000
+    gamma: float = 0.1
     lr_scheduler: str = "StepLR"  # StepLR/CosineAnnealing/ReduceLROnPlateau
     min_lr: float = 1e-6
     grad_clip: float = 0.0
@@ -51,8 +51,8 @@ class BaselineTrainingConfig:
     early_stopping_patience: int = 0  # 0表示禁用
     monitor_metric: str = "val_loss"  # val_loss/RMSPE
 
-    # 实验参数
-    num_rounds: int = 1
+    # 实验参数（来自预训练模型）
+    num_rounds: int = 5
     random_seed: int = 1234
 
     # 设备
@@ -93,6 +93,9 @@ class TrainingCallbacks:
         Callable[[int, int, int, int, dict[str, float]], None]
     ] = None
     on_log: Optional[Callable[[str, str], None]] = None  # (level, message)
+    on_period_end: Optional[Callable[[int, int, float, float, float, float], None]] = (
+        None  # (epoch, period, loss, loss_U, loss_F, loss_F_t)
+    )
 
 
 class BaselineTrainer:

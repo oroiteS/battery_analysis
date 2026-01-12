@@ -179,16 +179,14 @@ CREATE TABLE training_job_run_log (
   id BIGINT NOT NULL AUTO_INCREMENT,
   run_id BIGINT NOT NULL,
   user_id BIGINT NOT NULL COMMENT '日志所属用户（数据隔离）',
-  level ENUM('DEBUG','INFO','WARNING','ERROR') NOT NULL,
-  message VARCHAR(2000) NOT NULL,
+  log_file_path VARCHAR(500) NOT NULL COMMENT '日志文件路径（相对于项目根目录）',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  KEY idx_log_run (run_id),
+  UNIQUE KEY uk_run_log (run_id) COMMENT '每个运行只有一个日志文件记录',
   KEY idx_log_user (user_id),
-  KEY idx_log_run_time (run_id, created_at) COMMENT '优化按运行查询并排序',
   CONSTRAINT fk_log_run FOREIGN KEY (run_id) REFERENCES training_job_run(id),
   CONSTRAINT fk_log_user FOREIGN KEY (user_id) REFERENCES `user`(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='训练日志（按算法运行记录）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='训练日志文件路径（每个运行一条记录，指向日志文件）';
 
 CREATE TABLE model_version (
   id BIGINT NOT NULL AUTO_INCREMENT,
@@ -291,16 +289,14 @@ CREATE TABLE test_job_log (
   id BIGINT NOT NULL AUTO_INCREMENT,
   test_job_id BIGINT NOT NULL,
   user_id BIGINT NOT NULL COMMENT '日志所属用户（数据隔离）',
-  level ENUM('DEBUG','INFO','WARNING','ERROR') NOT NULL,
-  message VARCHAR(2000) NOT NULL,
+  log_file_path VARCHAR(500) NOT NULL COMMENT '日志文件路径（相对于项目根目录）',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  KEY idx_test_log (test_job_id),
+  UNIQUE KEY uk_test_log (test_job_id) COMMENT '每个测试任务只有一个日志文件记录',
   KEY idx_log_user (user_id),
-  KEY idx_test_log_time (test_job_id, created_at) COMMENT '优化按测试任务查询并排序',
   CONSTRAINT fk_test_log_job FOREIGN KEY (test_job_id) REFERENCES test_job(id),
   CONSTRAINT fk_test_log_user FOREIGN KEY (user_id) REFERENCES `user`(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试日志';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试日志文件路径（每个测试任务一条记录，指向日志文件）';
 
 CREATE TABLE test_export (
   id BIGINT NOT NULL AUTO_INCREMENT,
