@@ -7,10 +7,12 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import traceback
 from datetime import datetime, timezone
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Optional, cast
 
 import torch
 from sqlalchemy import update
@@ -67,25 +69,152 @@ class TrainingWorker:
         self.current_run: Optional[TrainingJobRun] = None
         self.run_id: Optional[int] = None
 
+        # WebSocket消息推送
+        self._ws_manager: Optional[Any] = None
+        self._init_websocket_manager()
+
+        # 文件日志记录器
+        self._file_logger: Optional[logging.Logger] = None
+        self._log_file_path: Optional[Path] = None
+
+    def _init_websocket_manager(self) -> None:
+        """初始化WebSocket管理器引用"""
+        try:
+            from src.routes.training import manager
+
+            self._ws_manager = manager
+        except ImportError:
+            self._ws_manager = None
+
+    def _init_file_logger(self, user_id: int, job_id: int) -> None:
+        """初始化文件日志记录器"""
+        # 创建日志目录: storage/models/{user_id}/logs/
+        log_dir = settings.MODEL_STORAGE_PATH / str(user_id) / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # 日志文件路径: training_job_{job_id}.log
+        self._log_file_path = log_dir / f"training_job_{job_id}.log"
+
+        # 创建专用logger
+        logger_name = f"training_job_{job_id}"
+        self._file_logger = logging.getLogger(logger_name)
+        self._file_logger.setLevel(logging.DEBUG)
+
+        # 清除已有的handlers（避免重复）
+        self._file_logger.handlers.clear()
+
+        # 文件handler
+        file_handler = logging.FileHandler(
+            self._log_file_path, mode="a", encoding="utf-8"
+        )
+        file_handler.setLevel(logging.DEBUG)
+
+        # 格式化器
+        formatter = logging.Formatter(
+            "%(asctime)s - [%(levelname)s] - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+        )
+        file_handler.setFormatter(formatter)
+
+        self._file_logger.addHandler(file_handler)
+
+        # 防止日志传播到root logger
+        self._file_logger.propagate = False
+
+    def _push_ws_message(self, message_type: str, data: dict[str, Any]) -> None:
+        """推送WebSocket消息（线程安全）"""
+        if self._ws_manager is not None:
+            message = {
+                "type": message_type,
+                "data": data,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            try:
+                self._ws_manager.push_message(self.job_id, message)
+            except Exception:
+                pass  # 静默失败，不影响训练
+
     def _log(self, level: str, message: str) -> None:
-        """记录日志到数据库"""
-        if self.db is not None and self.run_id is not None and self.job is not None:
-            log = TrainingJobRunLog(
-                run_id=self.run_id,
-                user_id=self.job.user_id,
-                level=level,
-                message=message,
-                created_at=datetime.now(timezone.utc),
+        """记录日志到文件和WebSocket（不再写入数据库）"""
+        # 1. 写入日志文件
+        if self._file_logger:
+            log_method = getattr(
+                self._file_logger, level.lower(), self._file_logger.info
             )
-            self.db.add(log)
+            log_method(message)
+        else:
+            # 如果文件logger未初始化，降级到终端打印
+            print(f"[{level}] {message}")
+
+        # 2. WebSocket推送日志（仅推送关键日志）
+        if self.current_run and level in ["WARNING", "ERROR"]:
+            self._push_ws_message(
+                "log",
+                {
+                    "run_id": self.run_id,
+                    "algorithm": str(self.current_run.algorithm),
+                    "level": level,
+                    "message": message[:500],  # 限制WebSocket消息长度
+                },
+            )
+
+    def _save_log_file_path(self) -> None:
+        """保存日志文件路径到数据库（每个运行只记录一次）"""
+        if self.db is None or self.run_id is None or self.job is None:
+            return
+
+        if self._log_file_path is None:
+            return
+
+        # 检查是否已存在
+        existing = (
+            self.db.query(TrainingJobRunLog)
+            .filter(TrainingJobRunLog.run_id == self.run_id)
+            .first()
+        )
+
+        if existing:
+            return  # 已存在，跳过
+
+        # 计算相对路径
+        try:
+            relative_path = self._log_file_path.relative_to(settings.BASE_DIR)
+        except ValueError:
+            relative_path = self._log_file_path
+
+        log_record = TrainingJobRunLog(
+            run_id=self.run_id,
+            user_id=self.job.user_id,
+            log_file_path=str(relative_path),
+            created_at=datetime.now(timezone.utc),
+        )
+
+        try:
+            self.db.add(log_record)
             self.db.commit()
-        print(f"[{level}] {message}")
+        except Exception as e:
+            self.db.rollback()
+            if self._file_logger:
+                self._file_logger.warning(f"日志文件路径保存失败: {str(e)}")
 
     def _save_epoch_metric(
         self, epoch: int, train_loss: float, val_loss: float, metrics: dict[str, Any]
     ) -> None:
-        """保存epoch指标到数据库"""
+        """保存epoch指标到数据库并推送WebSocket"""
         if self.db is None or self.run_id is None:
+            return
+
+        # 检查是否已存在该epoch的记录（避免重复插入）
+        existing = (
+            self.db.query(TrainingJobRunMetric)
+            .filter(
+                TrainingJobRunMetric.run_id == self.run_id,
+                TrainingJobRunMetric.epoch == epoch,
+            )
+            .first()
+        )
+
+        if existing:
+            # 如果已存在，跳过插入
             return
 
         normalized_metrics = _normalize_metrics(metrics)
@@ -97,18 +226,44 @@ class TrainingWorker:
             metrics=normalized_metrics,
             created_at=datetime.now(timezone.utc),
         )
-        self.db.add(metric)
 
-        # 每10个epoch提交一次
-        if epoch % 10 == 0:
-            self.db.commit()
+        try:
+            self.db.add(metric)
+            # 每10个epoch提交一次
+            if epoch % 10 == 0:
+                self.db.commit()
+        except Exception as e:
+            # 如果插入失败（例如唯一约束冲突），回滚并继续
+            self.db.rollback()
+            if self._file_logger:
+                self._file_logger.warning(f"Epoch {epoch} 指标保存失败: {str(e)}")
+
+        # WebSocket推送epoch进度
+        if self.current_run:
+            total_epochs_value = cast(int | None, self.current_run.total_epochs)
+            epoch_data = {
+                "run_id": self.run_id,
+                "algorithm": str(self.current_run.algorithm),
+                "epoch": epoch + 1,
+                "total_epochs": int(total_epochs_value)
+                if total_epochs_value is not None
+                else 0,
+                "train_loss": _to_float(train_loss),
+                "val_loss": _to_float(val_loss),
+            }
+            # 添加额外指标
+            epoch_data.update({k: _to_float(v) for k, v in normalized_metrics.items()})
+            self._push_ws_message("epoch_progress", epoch_data)
 
     def _update_run_status(
         self, status: str, current_epoch: Optional[int] = None
     ) -> None:
-        """更新运行状态"""
+        """更新运行状态并推送WebSocket"""
         if self.db is None or self.run_id is None or self.current_run is None:
             return
+
+        status_value = cast(str | None, self.current_run.status)
+        old_status = status_value if status_value is not None else "UNKNOWN"
 
         values: dict[str, Any] = {"status": status}
 
@@ -127,10 +282,26 @@ class TrainingWorker:
         )
         self.db.commit()
 
+        # WebSocket推送状态变化
+        if old_status != status:
+            self._push_ws_message(
+                "run_status_change",
+                {
+                    "run_id": self.run_id,
+                    "algorithm": str(self.current_run.algorithm),
+                    "old_status": old_status,
+                    "new_status": status,
+                    "current_epoch": current_epoch,
+                },
+            )
+
     def _update_job_status(self, status: str, progress: Optional[float] = None) -> None:
-        """更新任务状态"""
+        """更新任务状态并推送WebSocket"""
         if self.db is None or self.job is None:
             return
+
+        status_value = cast(str | None, self.job.status)
+        old_status = status_value if status_value is not None else "UNKNOWN"
 
         values: dict[str, Any] = {"status": status}
 
@@ -146,6 +317,45 @@ class TrainingWorker:
             update(TrainingJob).where(TrainingJob.id == self.job_id).values(**values)
         )
         self.db.commit()
+
+        # WebSocket推送任务进度
+        if progress is not None or old_status != status:
+            # 获取所有runs的状态统计
+            all_runs = (
+                self.db.query(TrainingJobRun)
+                .filter(TrainingJobRun.job_id == self.job_id)
+                .all()
+            )
+
+            completed_algorithms = [
+                str(r.algorithm) for r in all_runs if str(r.status) == "SUCCEEDED"
+            ]
+            running_algorithms = [
+                str(r.algorithm) for r in all_runs if str(r.status) == "RUNNING"
+            ]
+            pending_algorithms = [
+                str(r.algorithm) for r in all_runs if str(r.status) == "PENDING"
+            ]
+
+            job_progress_value = cast(float | int | None, self.job.progress)
+            progress_value = (
+                float(progress)
+                if progress is not None
+                else float(job_progress_value)
+                if job_progress_value is not None
+                else 0.0
+            )
+            self._push_ws_message(
+                "job_progress",
+                {
+                    "job_id": self.job_id,
+                    "status": status,
+                    "progress": progress_value,
+                    "completed_algorithms": completed_algorithms,
+                    "running_algorithms": running_algorithms,
+                    "pending_algorithms": pending_algorithms,
+                },
+            )
 
     def _save_model_version(
         self,
@@ -223,8 +433,13 @@ class TrainingWorker:
                 print(f"训练任务 {self.job_id} 不存在")
                 return
 
+            # 初始化文件日志记录器
+            user_id = cast(int, self.job.user_id)
+            self._init_file_logger(user_id, self.job_id)
+
             self._update_job_status("RUNNING", progress=0.0)
             self._log("INFO", f"开始执行训练任务 #{self.job_id}")
+            self._log("INFO", f"日志文件: {self._log_file_path}")
 
             runs = (
                 db.query(TrainingJobRun)
@@ -277,6 +492,9 @@ class TrainingWorker:
                 )
                 self._update_run_status("RUNNING")
 
+                # 保存日志文件路径到数据库（每个运行只记录一次）
+                self._save_log_file_path()
+
                 try:
                     if bool(run.algorithm == "BASELINE"):  # type: ignore[arg-type]
                         self._train_baseline(battery_ids_train, battery_ids_test)
@@ -327,6 +545,49 @@ class TrainingWorker:
             if self.db is not None:
                 self.db.close()
 
+    def _create_log_callback(self) -> Any:
+        """创建通用的日志回调函数(包含WebSocket推送)"""
+
+        def on_log(level: str, message: str) -> None:
+            self._log(level, message)
+
+            # 解析period级别的日志并推送详细损失信息
+            # 格式: "Epoch: 10, Period: 152, Loss: 0.05782, Loss_U: 0.00166, Loss_F: 0.05616, Loss_F_t: 0.00000"
+            if "Epoch:" in message and "Period:" in message and "Loss:" in message:
+                try:
+                    import re
+
+                    match = re.search(
+                        r"Epoch:\s*(\d+),\s*Period:\s*(\d+),\s*Loss:\s*([\d.]+),\s*Loss_U:\s*([\d.]+),\s*Loss_F:\s*([\d.]+),\s*Loss_F_t:\s*([\d.]+)",
+                        message,
+                    )
+                    if match and self.current_run:
+                        epoch = int(match.group(1))
+                        period = int(match.group(2))
+                        loss = float(match.group(3))
+                        loss_u = float(match.group(4))
+                        loss_f = float(match.group(5))
+                        loss_f_t = float(match.group(6))
+
+                        # 推送period级别的训练详情
+                        self._push_ws_message(
+                            "training_detail",
+                            {
+                                "run_id": self.run_id,
+                                "algorithm": str(self.current_run.algorithm),
+                                "epoch": epoch,
+                                "period": period,
+                                "loss": loss,
+                                "loss_U": loss_u,
+                                "loss_F": loss_f,
+                                "loss_F_t": loss_f_t,
+                            },
+                        )
+                except Exception:
+                    pass  # 解析失败时静默忽略
+
+        return on_log
+
     def _train_baseline(
         self, battery_ids_train: list[int], battery_ids_test: list[int]
     ) -> None:
@@ -342,19 +603,54 @@ class TrainingWorker:
         config = BaselineTrainingConfig(
             seq_len=hyperparams.get("seq_len", 1),
             perc_val=hyperparams.get("perc_val", 0.2),
-            num_layers=hyperparams.get("num_layers", [2, 3]),
-            num_neurons=hyperparams.get("num_neurons", [100, 150]),
-            num_epoch=hyperparams.get("num_epoch", 500),
-            batch_size=hyperparams.get("batch_size", 32),
+            num_layers=hyperparams.get("num_layers", [2]),
+            num_neurons=hyperparams.get("num_neurons", [128]),
+            num_epoch=hyperparams.get("num_epoch", 2000),
+            batch_size=hyperparams.get("batch_size", 1024),
             lr=hyperparams.get("lr", 0.001),
-            step_size=hyperparams.get("step_size", 100),
-            gamma=hyperparams.get("gamma", 0.5),
+            step_size=hyperparams.get("step_size", 50000),
+            gamma=hyperparams.get("gamma", 0.1),
             num_rounds=hyperparams.get("num_rounds", 1),
             random_seed=hyperparams.get("random_seed", 1234),
         )
 
         def on_log(level: str, message: str) -> None:
             self._log(level, message)
+
+            # 解析period级别的日志并推送详细损失信息
+            # 格式: "Epoch: 10, Period: 152, Loss: 0.05782, Loss_U: 0.00166, Loss_F: 0.05616, Loss_F_t: 0.00000"
+            if "Epoch:" in message and "Period:" in message and "Loss:" in message:
+                try:
+                    import re
+
+                    match = re.search(
+                        r"Epoch:\s*(\d+),\s*Period:\s*(\d+),\s*Loss:\s*([\d.]+),\s*Loss_U:\s*([\d.]+),\s*Loss_F:\s*([\d.]+),\s*Loss_F_t:\s*([\d.]+)",
+                        message,
+                    )
+                    if match and self.current_run:
+                        epoch = int(match.group(1))
+                        period = int(match.group(2))
+                        loss = float(match.group(3))
+                        loss_u = float(match.group(4))
+                        loss_f = float(match.group(5))
+                        loss_f_t = float(match.group(6))
+
+                        # 推送period级别的训练详情
+                        self._push_ws_message(
+                            "training_detail",
+                            {
+                                "run_id": self.run_id,
+                                "algorithm": str(self.current_run.algorithm),
+                                "epoch": epoch,
+                                "period": period,
+                                "loss": loss,
+                                "loss_U": loss_u,
+                                "loss_F": loss_f,
+                                "loss_F_t": loss_f_t,
+                            },
+                        )
+                except Exception:
+                    pass  # 解析失败时静默忽略
 
         def on_epoch_end(
             epoch: int, train_loss: float, val_loss: float, metrics: dict[str, Any]
@@ -421,6 +717,32 @@ class TrainingWorker:
         def on_log(level: str, message: str) -> None:
             self._log(level, message)
 
+            # 解析period级别的日志并推送详细损失信息
+            if "Epoch:" in message and "Period:" in message and "Loss:" in message:
+                try:
+                    import re
+
+                    match = re.search(
+                        r"Epoch:\s*(\d+),\s*Period:\s*(\d+),\s*Loss:\s*([\d.]+),\s*Loss_U:\s*([\d.]+),\s*Loss_F:\s*([\d.]+),\s*Loss_F_t:\s*([\d.]+)",
+                        message,
+                    )
+                    if match and self.current_run:
+                        self._push_ws_message(
+                            "training_detail",
+                            {
+                                "run_id": self.run_id,
+                                "algorithm": str(self.current_run.algorithm),
+                                "epoch": int(match.group(1)),
+                                "period": int(match.group(2)),
+                                "loss": float(match.group(3)),
+                                "loss_U": float(match.group(4)),
+                                "loss_F": float(match.group(5)),
+                                "loss_F_t": float(match.group(6)),
+                            },
+                        )
+                except Exception:
+                    pass
+
         def on_epoch_end(
             epoch: int, train_loss: float, val_loss: float, metrics: dict[str, Any]
         ) -> None:
@@ -467,22 +789,73 @@ class TrainingWorker:
             job_hyperparams if job_hyperparams is not None else {}
         )  # type: ignore[assignment]
 
+        loss_weights_value = hyperparams.get("loss_weights", (1.0, 1.0, 1.0))
+        loss_weights: tuple[float, float, float]
+        if (
+            isinstance(loss_weights_value, (list, tuple))
+            and len(loss_weights_value) == 3
+        ):
+            loss_weights = (
+                float(loss_weights_value[0]),
+                float(loss_weights_value[1]),
+                float(loss_weights_value[2]),
+            )
+        else:
+            loss_weights = (1.0, 1.0, 1.0)
+
         config = DeepHPMTrainingConfig(
             seq_len=hyperparams.get("seq_len", 1),
             perc_val=hyperparams.get("perc_val", 0.2),
-            num_layers=hyperparams.get("num_layers", [2, 3]),
-            num_neurons=hyperparams.get("num_neurons", [100, 150]),
-            num_epoch=hyperparams.get("num_epoch", 500),
-            batch_size=hyperparams.get("batch_size", 32),
+            num_layers=hyperparams.get("num_layers", [2]),
+            num_neurons=hyperparams.get("num_neurons", [128]),
+            num_epoch=hyperparams.get("num_epoch", 2000),
+            batch_size=hyperparams.get("batch_size", 1024),
             lr=hyperparams.get("lr", 0.001),
-            step_size=hyperparams.get("step_size", 100),
-            gamma=hyperparams.get("gamma", 0.5),
-            num_rounds=hyperparams.get("num_rounds", 1),
+            dropout_rate=hyperparams.get("dropout_rate", 0.2),
+            weight_decay=hyperparams.get("weight_decay", 0.0),
+            step_size=hyperparams.get("step_size", 50000),
+            gamma=hyperparams.get("gamma", 0.1),
+            lr_scheduler=hyperparams.get("lr_scheduler", "StepLR"),
+            min_lr=hyperparams.get("min_lr", 1e-6),
+            grad_clip=hyperparams.get("grad_clip", 0.0),
+            early_stopping_patience=hyperparams.get("early_stopping_patience", 0),
+            monitor_metric=hyperparams.get("monitor_metric", "val_loss"),
+            num_rounds=hyperparams.get("num_rounds", 5),
             random_seed=hyperparams.get("random_seed", 1234),
+            inputs_dynamical=hyperparams.get("inputs_dynamical", "s_norm, t_norm"),
+            inputs_dim_dynamical=hyperparams.get("inputs_dim_dynamical", "inputs_dim"),
+            loss_mode=hyperparams.get("loss_mode", "Sum"),
+            loss_weights=loss_weights,
         )
 
         def on_log(level: str, message: str) -> None:
             self._log(level, message)
+
+            # 解析period级别的日志并推送详细损失信息
+            if "Epoch:" in message and "Period:" in message and "Loss:" in message:
+                try:
+                    import re
+
+                    match = re.search(
+                        r"Epoch:\s*(\d+),\s*Period:\s*(\d+),\s*Loss:\s*([\d.]+),\s*Loss_U:\s*([\d.]+),\s*Loss_F:\s*([\d.]+),\s*Loss_F_t:\s*([\d.]+)",
+                        message,
+                    )
+                    if match and self.current_run:
+                        self._push_ws_message(
+                            "training_detail",
+                            {
+                                "run_id": self.run_id,
+                                "algorithm": str(self.current_run.algorithm),
+                                "epoch": int(match.group(1)),
+                                "period": int(match.group(2)),
+                                "loss": float(match.group(3)),
+                                "loss_U": float(match.group(4)),
+                                "loss_F": float(match.group(5)),
+                                "loss_F_t": float(match.group(6)),
+                            },
+                        )
+                except Exception:
+                    pass
 
         def on_epoch_end(
             epoch: int, train_loss: float, val_loss: float, metrics: dict[str, Any]

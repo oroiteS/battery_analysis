@@ -13,11 +13,12 @@ from pathlib import Path
 import h5py
 import numpy as np
 import scipy.io
-from src.models import SessionLocal, Dataset, CycleData, BatteryUnit, Base, engine
-
 # 添加项目根目录到路径（必须在导入 src 模块之前）
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
+
+from src.models import SessionLocal, Dataset, CycleData, BatteryUnit, Base, engine
+
 
 
 
@@ -44,7 +45,7 @@ def import_dataset():
     Base.metadata.create_all(bind=engine)
 
     # 数据文件路径
-    mat_file = project_root.parent / "power_soh" / "SeversonBattery.mat"
+    mat_file = project_root / "data" / "SeversonBattery.mat"
 
     if not mat_file.exists():
         print(f"错误: 数据文件不存在: {mat_file}")

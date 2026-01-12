@@ -538,17 +538,7 @@ def train(
                 results_period["var_F"][period] = torch.exp(-log_sigma_f).detach()
                 results_period["var_F_t"][period] = torch.exp(-log_sigma_f_t).detach()
 
-                if (epoch + 1) % 1 == 0 and (period + 1) % 1 == 0:
-                    print(
-                        "Epoch: {}, Period: {}, Loss: {:.5f}, Loss_U: {:.5f}, Loss_F: {:.5f}, Loss_F_t: {:.5f}".format(
-                            epoch + 1,
-                            period + 1,
-                            loss,
-                            criterion.loss_U,
-                            criterion.loss_F,
-                            criterion.loss_F_t,
-                        )
-                    )
+                # 详细的训练日志已通过回调函数记录，无需在此打印
 
         results_epoch["loss_train"][epoch] = torch.mean(results_period["loss_train"])
         results_epoch["p_r"][epoch] = torch.mean(results_period["p_r"])
