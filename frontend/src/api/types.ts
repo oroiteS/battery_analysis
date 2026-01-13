@@ -79,7 +79,7 @@ export interface CreateTrainingJobRequest {
   target: 'RUL' | 'PCL' | 'BOTH'
   algorithms: string[]
   batteries: BatterySelection[]
-  // Hyperparameters
+  // 基础超参数
   seq_len?: number
   perc_val?: number
   num_layers?: number[]
@@ -89,19 +89,25 @@ export interface CreateTrainingJobRequest {
   lr?: number
   dropout_rate?: number
   weight_decay?: number
+  // 学习率调度器参数
+  lr_scheduler?: 'StepLR' | 'CosineAnnealing' | 'ReduceLROnPlateau'
   step_size?: number
   gamma?: number
-  lr_scheduler?: string
   min_lr?: number
+  // 训练优化参数
   grad_clip?: number
   early_stopping_patience?: number
-  monitor_metric?: string
+  monitor_metric?: 'val_loss' | 'RMSPE'
+  // 训练轮次参数
   num_rounds?: number
   random_seed?: number
+  // DeepHPM特定参数
   inputs_dynamical?: string
   inputs_dim_dynamical?: string
-  loss_mode?: string
+  loss_mode?: 'Sum' | 'AdpBal' | 'Baseline'
   loss_weights?: number[]
+  // BiLSTM特定参数
+  hidden_dim?: number
 }
 
 export interface TrainingJobResponse {
@@ -178,4 +184,114 @@ export interface Algorithm {
 
 export interface AlgorithmListResponse {
   algorithms: Algorithm[]
+}
+
+export interface ModelVersion {
+  id: number
+  user_id: number
+  run_id: number
+  algorithm: string
+  name: string
+  version: string
+  config: Record<string, any>
+  metrics: Record<string, any>
+  checkpoint_path: string
+  created_at: string
+}
+
+export interface ModelVersionDetail {
+  model: ModelVersion
+  training_info: {
+    run_id: number
+    job_id: number
+    algorithm: string
+    status: string
+    started_at: string | null
+    finished_at: string | null
+  } | null
+}
+
+// --- Testing Types ---
+
+export interface CreateTestJobRequest {
+  model_version_id: number
+  dataset_id: number
+  target: 'RUL' | 'PCL' | 'BOTH'
+  battery_ids: number[]
+  horizon: number
+}
+
+export interface TestJobResponse {
+  id: number
+  user_id: number
+  model_version_id: number
+  dataset_id: number
+  target: string
+  horizon: number
+  status: string
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+export interface TestJobDetail {
+  job: TestJobResponse
+  model_info: {
+    id: number
+    name: string
+    version: string
+    algorithm: string
+  }
+  batteries: {
+    battery_id: number
+    battery_code: string
+    total_cycles: number
+  }[]
+}
+
+export interface TestMetrics {
+  job_id: number
+  overall_metrics: {
+    target: string
+    metrics: Record<string, number>
+  }[]
+  battery_metrics: {
+    battery_id: number
+    target: string
+    metrics: Record<string, number>
+  }[]
+}
+
+export interface TestPrediction {
+  battery_id: number
+  cycle_num: number
+  target: string
+  y_true: number
+  y_pred: number
+}
+
+export interface TestPredictionsResponse {
+  job_id: number
+  predictions: TestPrediction[]
+}
+
+export interface TestLog {
+  timestamp: string
+  level: string
+  message: string
+}
+
+export interface TestLogsResponse {
+  job_id: number
+  log_file_path: string | null
+  total_lines?: number
+  returned_lines?: number
+  logs: TestLog[]
+  message?: string
+}
+
+export interface TestExportResponse {
+  export_id: number
+  status: string
+  message: string
 }

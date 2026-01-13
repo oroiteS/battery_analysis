@@ -5,7 +5,7 @@
 提供模型版本的查询、下载和删除功能
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from src.config import settings
+from src.config import get_local_now, settings
 from src.models import ModelVersion, TrainingJobRun, User, get_db
 from src.routes.auth import get_current_user
 
@@ -200,7 +200,7 @@ async def delete_model_version(
     db.execute(
         update(ModelVersion)
         .where(ModelVersion.id == version_id)
-        .values(deleted_at=datetime.now(timezone.utc))
+        .values(deleted_at=get_local_now())
     )
     db.commit()
 

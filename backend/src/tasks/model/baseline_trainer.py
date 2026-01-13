@@ -87,7 +87,9 @@ class BaselineTrainingConfig:
 class TrainingCallbacks:
     """训练回调函数集合"""
 
-    on_epoch_end: Optional[Callable[[int, float, float, dict[str, float]], None]] = None
+    on_epoch_end: Optional[
+        Callable[[int, float, float, dict[str, float], int, int], None]
+    ] = None  # (epoch, train_loss, val_loss, metrics, round_idx, num_rounds)
     on_training_end: Optional[Callable[[dict[str, Any]], None]] = None
     on_hyperparameter_search: Optional[
         Callable[[int, int, int, int, dict[str, float]], None]
@@ -261,6 +263,8 @@ class BaselineTrainer:
                         inputs_val=inputs_val,
                         targets_val=targets_val,
                         layers=layers,
+                        round_idx=round_idx,
+                        num_rounds=self.config.num_rounds,
                     )
 
                     # 评估模型
@@ -315,6 +319,8 @@ class BaselineTrainer:
         inputs_val: torch.Tensor,
         targets_val: torch.Tensor,
         layers: list[int],
+        round_idx: int = 0,
+        num_rounds: int = 1,
     ) -> tuple[Any, dict]:
         """训练单轮"""
         inputs_dim = inputs_train.shape[2]
@@ -383,6 +389,18 @@ class BaselineTrainer:
             )
 
         # 训练
+        # 创建epoch结束回调（实时输出）
+        def epoch_callback(epoch, train_loss, val_loss, loss_U, loss_F, loss_F_t):
+            if self.callbacks.on_epoch_end:
+                extra_metrics = {
+                    "loss_U": loss_U,
+                    "loss_F": loss_F,
+                    "loss_F_t": loss_F_t,
+                }
+                self.callbacks.on_epoch_end(
+                    epoch, train_loss, val_loss, extra_metrics, round_idx, num_rounds
+                )
+
         model, results_epoch = train(
             num_epoch=self.config.num_epoch,
             batch_size=self.config.batch_size,
@@ -397,19 +415,8 @@ class BaselineTrainer:
             log_sigma_u=log_sigma_u,
             log_sigma_f=log_sigma_f,
             log_sigma_f_t=log_sigma_f_t,
+            on_epoch_end=epoch_callback,  # 传递回调
         )
-
-        # 每个 epoch 的回调
-        if self.callbacks.on_epoch_end and results_epoch:
-            for epoch in range(len(results_epoch.get("loss_train", []))):
-                train_loss = results_epoch["loss_train"][epoch]
-                val_loss = results_epoch["loss_val"][epoch]
-                self.callbacks.on_epoch_end(
-                    epoch,
-                    train_loss,
-                    val_loss,
-                    {},
-                )
 
         return model, results_epoch
 

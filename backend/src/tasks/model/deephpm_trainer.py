@@ -107,7 +107,9 @@ class DeepHPMTrainingConfig:
 class TrainingCallbacks:
     """训练回调函数集合"""
 
-    on_epoch_end: Optional[Callable[[int, float, float, dict[str, float]], None]] = None
+    on_epoch_end: Optional[
+        Callable[[int, float, float, dict[str, float], int, int], None]
+    ] = None  # (epoch, train_loss, val_loss, metrics, round_idx, num_rounds)
     on_training_end: Optional[Callable[[dict[str, Any]], None]] = None
     on_hyperparameter_search: Optional[
         Callable[[int, int, int, int, dict[str, float]], None]
@@ -254,6 +256,18 @@ def train_deephpm_from_database(
                 )
 
             # 训练
+            # 创建epoch结束回调（实时输出）
+            def epoch_callback(epoch, train_loss, val_loss, loss_U, loss_F, loss_F_t):
+                if callbacks.on_epoch_end:
+                    extra_metrics = {
+                        "loss_U": loss_U,
+                        "loss_F": loss_F,
+                        "loss_F_t": loss_F_t,
+                    }
+                    callbacks.on_epoch_end(
+                        epoch, train_loss, val_loss, extra_metrics, 0, 1
+                    )
+
             model, results_epoch = train(
                 num_epoch=config.num_epoch,
                 batch_size=config.batch_size,
@@ -268,14 +282,8 @@ def train_deephpm_from_database(
                 log_sigma_u=log_sigma_u,
                 log_sigma_f=log_sigma_f,
                 log_sigma_f_t=log_sigma_f_t,
+                on_epoch_end=epoch_callback,  # 传递回调
             )
-
-            # 手动调用 epoch 回调
-            if callbacks.on_epoch_end:
-                for epoch in range(config.num_epoch):
-                    train_loss = results_epoch["loss_train"][epoch].item()
-                    val_loss = results_epoch["loss_val"][epoch].item()
-                    callbacks.on_epoch_end(epoch + 1, train_loss, val_loss, {})
 
             # 评估
             model.eval()

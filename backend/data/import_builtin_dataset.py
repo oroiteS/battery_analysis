@@ -18,7 +18,7 @@ import scipy.io
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.models import SessionLocal, Dataset, CycleData, BatteryUnit, Base, engine
+from src.models import SessionLocal, Dataset, CycleData, BatteryUnit, Base, engine  # noqa: E402
 
 
 
