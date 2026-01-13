@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 
+defineOptions({
+  name: 'TrainingView'
+})
+
 const trainingForm = reactive({
   model: 'BiLSTM',
   epochs: 100,
@@ -19,7 +23,7 @@ const startTraining = () => {
   progress.value = 0
   logs.value = []
   logs.value.push(`[${new Date().toLocaleTimeString()}] 开始训练 ${trainingForm.model} 模型...`)
-  
+
   // Mock training process
   const interval = setInterval(() => {
     progress.value += 10
@@ -46,9 +50,9 @@ const startTraining = () => {
                 <el-option label="DeepHPM (Physics Informed)" value="DeepHPM" />
               </el-select>
             </el-form-item>
-            
+
             <el-divider content-position="left">超参数设置</el-divider>
-            
+
             <el-form-item label="训练轮次">
               <el-input-number v-model="trainingForm.epochs" :min="1" :max="1000" />
             </el-form-item>
@@ -73,7 +77,7 @@ const startTraining = () => {
             <el-form-item label="数据集划分">
               <el-slider v-model="trainingForm.splitRatio" :step="0.1" :min="0.5" :max="0.9" show-input />
             </el-form-item>
-            
+
             <el-form-item>
               <el-button type="primary" :loading="isTraining" @click="startTraining" style="width: 100%">
                 {{ isTraining ? '训练中...' : '开始训练' }}
@@ -82,7 +86,7 @@ const startTraining = () => {
           </el-form>
         </el-card>
       </el-col>
-      
+
       <el-col :span="16">
         <el-card shadow="hover" header="训练监控">
           <div v-if="isTraining || progress > 0">
@@ -99,7 +103,7 @@ const startTraining = () => {
             <el-empty description="请配置参数并开始训练" />
           </div>
         </el-card>
-        
+
         <el-card shadow="hover" header="模型评估结果" class="mt-20" v-if="progress === 100">
            <el-descriptions border>
              <el-descriptions-item label="RMSPE">1.25%</el-descriptions-item>

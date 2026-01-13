@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import { User, Lock, Message } from '@element-plus/icons-vue'
+import { User, Lock, Message, ElementPlus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+
+defineOptions({
+  name: 'LoginView',
+})
 
 const router = useRouter()
 const loginFormRef = ref()
@@ -13,25 +17,22 @@ const isRegister = ref(false)
 
 const loginForm = reactive({
   username: '',
-  password: ''
+  password: '',
 })
 
 const registerForm = reactive({
   user_name: '',
   email: '',
   password: '',
-  confirmPassword: ''
+  confirmPassword: '',
 })
 
 const loginRules = {
-  username: [
-    { required: true, message: '请输入用户名', trigger: 'blur' }
-  ],
-  password: [
-    { required: true, message: '请输入密码', trigger: 'blur' }
-  ]
+  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const validatePass2 = (rule: any, value: any, callback: any) => {
   if (value === '') {
     callback(new Error('请再次输入密码'))
@@ -43,19 +44,13 @@ const validatePass2 = (rule: any, value: any, callback: any) => {
 }
 
 const registerRules = {
-  user_name: [
-    { required: true, message: '请输入用户名', trigger: 'blur' }
-  ],
+  user_name: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   email: [
     { required: true, message: '请输入邮箱', trigger: 'blur' },
-    { type: 'email', message: '请输入正确的邮箱地址', trigger: ['blur', 'change'] }
+    { type: 'email', message: '请输入正确的邮箱地址', trigger: ['blur', 'change'] },
   ],
-  password: [
-    { required: true, message: '请输入密码', trigger: 'blur' }
-  ],
-  confirmPassword: [
-    { validator: validatePass2, trigger: 'blur' }
-  ]
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+  confirmPassword: [{ validator: validatePass2, trigger: 'blur' }],
 }
 
 const loading = ref(false)
@@ -77,10 +72,10 @@ const handleLogin = async () => {
           router.push('/')
         } else {
           // For demo purposes, allow any login or show error
-           // In real app, check response
-           ElMessage.success('登录成功 (演示模式)')
-           localStorage.setItem('token', 'mock-jwt-token')
-           router.push('/')
+          // In real app, check response
+          ElMessage.success('登录成功 (演示模式)')
+          localStorage.setItem('token', 'mock-jwt-token')
+          router.push('/')
         }
       }, 1000)
     }
@@ -117,7 +112,7 @@ const toggleMode = () => {
     <div class="login-box">
       <div class="login-header">
         <div class="logo-placeholder">
-           <el-icon :size="40" color="#409EFF"><ElementPlus /></el-icon>
+          <el-icon :size="40" color="#409EFF"><ElementPlus /></el-icon>
         </div>
         <h2 class="title">储能电池寿命分析平台</h2>
         <p class="subtitle">Battery Life Analysis & Algorithm Testing Platform</p>
@@ -133,11 +128,7 @@ const toggleMode = () => {
         size="large"
       >
         <el-form-item prop="username">
-          <el-input
-            v-model="loginForm.username"
-            placeholder="用户名"
-            :prefix-icon="User"
-          />
+          <el-input v-model="loginForm.username" placeholder="用户名" :prefix-icon="User" />
         </el-form-item>
 
         <el-form-item prop="password">
@@ -152,12 +143,7 @@ const toggleMode = () => {
         </el-form-item>
 
         <el-form-item>
-          <el-button
-            type="primary"
-            :loading="loading"
-            class="login-button"
-            @click="handleLogin"
-          >
+          <el-button type="primary" :loading="loading" class="login-button" @click="handleLogin">
             登录
           </el-button>
         </el-form-item>
@@ -178,19 +164,11 @@ const toggleMode = () => {
         size="large"
       >
         <el-form-item prop="user_name">
-          <el-input
-            v-model="registerForm.user_name"
-            placeholder="用户名"
-            :prefix-icon="User"
-          />
+          <el-input v-model="registerForm.user_name" placeholder="用户名" :prefix-icon="User" />
         </el-form-item>
 
         <el-form-item prop="email">
-          <el-input
-            v-model="registerForm.email"
-            placeholder="邮箱"
-            :prefix-icon="Message"
-          />
+          <el-input v-model="registerForm.email" placeholder="邮箱" :prefix-icon="Message" />
         </el-form-item>
 
         <el-form-item prop="password">
@@ -215,18 +193,15 @@ const toggleMode = () => {
         </el-form-item>
 
         <el-form-item>
-          <el-button
-            type="primary"
-            :loading="loading"
-            class="login-button"
-            @click="handleRegister"
-          >
+          <el-button type="primary" :loading="loading" class="login-button" @click="handleRegister">
             注册
           </el-button>
         </el-form-item>
 
-        <div class="form-footer" style="justify-content: center;">
-          <el-link type="primary" :underline="false" @click="toggleMode">已有账号？立即登录</el-link>
+        <div class="form-footer" style="justify-content: center">
+          <el-link type="primary" :underline="false" @click="toggleMode"
+            >已有账号？立即登录</el-link
+          >
         </div>
       </el-form>
     </div>

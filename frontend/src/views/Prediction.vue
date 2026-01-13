@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
+defineOptions({
+  name: 'PredictionView'
+})
+
 const predictForm = ref({
   batteryId: '',
   modelId: '',
