@@ -3,6 +3,7 @@ import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { User, Lock, Message, ElementPlus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { login, register, getMe } from '../api/auth'
 
 defineOptions({
   name: 'LoginView',
@@ -58,28 +59,29 @@ const loading = ref(false)
 const handleLogin = async () => {
   if (!loginFormRef.value) return
 
-  await loginFormRef.value.validate((valid: boolean) => {
+  await loginFormRef.value.validate(async (valid: boolean) => {
     if (valid) {
       loading.value = true
-      // TODO: Call API /v1/auth/login
-      // Simulate API call
-      setTimeout(() => {
+      try {
+        const tokenRes = await login({
+          username: loginForm.username,
+          password: loginForm.password
+        })
+
+        localStorage.setItem('token', tokenRes.access_token)
+
+        // Fetch user info
+        const userRes = await getMe()
+        localStorage.setItem('username', userRes.user_name)
+
+        ElMessage.success('登录成功')
+        router.push('/')
+      } catch (error) {
+        // Error is handled by interceptor
+        console.error(error)
+      } finally {
         loading.value = false
-        if (loginForm.username === 'admin' && loginForm.password === '123456') {
-          ElMessage.success('登录成功')
-          // Store token (mock)
-          localStorage.setItem('token', 'mock-jwt-token')
-          localStorage.setItem('username', loginForm.username)
-          router.push('/')
-        } else {
-          // For demo purposes, allow any login or show error
-          // In real app, check response
-          ElMessage.success('登录成功 (演示模式)')
-          localStorage.setItem('token', 'mock-jwt-token')
-          localStorage.setItem('username', loginForm.username)
-          router.push('/')
-        }
-      }, 1000)
+      }
     }
   })
 }
@@ -87,16 +89,22 @@ const handleLogin = async () => {
 const handleRegister = async () => {
   if (!registerFormRef.value) return
 
-  await registerFormRef.value.validate((valid: boolean) => {
+  await registerFormRef.value.validate(async (valid: boolean) => {
     if (valid) {
       loading.value = true
-      // TODO: Call API /v1/auth/register
-      // Simulate API call
-      setTimeout(() => {
-        loading.value = false
+      try {
+        await register({
+          user_name: registerForm.user_name,
+          email: registerForm.email,
+          password: registerForm.password
+        })
         ElMessage.success('注册成功，请登录')
         isRegister.value = false
-      }, 1000)
+      } catch (error) {
+        console.error(error)
+      } finally {
+        loading.value = false
+      }
     }
   })
 }
@@ -130,7 +138,7 @@ const toggleMode = () => {
         size="large"
       >
         <el-form-item prop="username">
-          <el-input v-model="loginForm.username" placeholder="用户名" :prefix-icon="User" />
+          <el-input v-model="loginForm.username" placeholder="用户名 (邮箱)" :prefix-icon="User" />
         </el-form-item>
 
         <el-form-item prop="password">
