@@ -4,12 +4,24 @@ import LineChart from '../components/charts/LineChart.vue'
 import ScatterChart from '../components/charts/ScatterChart.vue'
 import HistogramChart from '../components/charts/HistogramChart.vue'
 import HeatmapChart from '../components/charts/HeatmapChart.vue'
+import { getDatasets, getBatteries } from '../api/data'
+import {
+  getBatteryStats,
+  getTrendData,
+  getScatterData,
+  getPCLDistribution,
+  getCorrelationMatrix
+} from '../api/analysis'
+import type { BatteryUnit } from '../api/types'
+import { ElMessage } from 'element-plus'
 
-const batteryId = ref('')
-const batteryOptions = Array.from({ length: 124 }, (_, i) => ({
-  value: `B${String(i + 1).padStart(4, '0')}`,
-  label: `电池组 B${String(i + 1).padStart(4, '0')}`
-}))
+// eslint-disable-next-line vue/multi-word-component-names
+defineOptions({
+  name: 'DataAnalysisView'
+})
+
+const batteryId = ref<number | null>(null)
+const batteryOptions = ref<{ value: number; label: string }[]>([])
 
 // Feature selection for Line Chart
 const selectedFeature = ref('feature_1')
@@ -21,18 +33,10 @@ const featureOptions = Array.from({ length: 8 }, (_, i) => ({
 // Feature selection for Scatter Chart (RUL)
 const selectedRulFeature = ref('feature_1')
 
-// --- Mock Data ---
+// --- Data ---
 
 // 1. Statistical Table Data
-const tableData = ref(Array.from({ length: 8 }, (_, i) => ({
-  name: `feature_${i + 1}`,
-  mean: (Math.random() * 10).toFixed(2),
-  variance: (Math.random() * 2).toFixed(2),
-  min: (Math.random() * 5).toFixed(2),
-  max: (Math.random() * 15).toFixed(2),
-  r2_rul: (Math.random() * 2 - 1).toFixed(3), // -1 to 1
-  r2_pcl: (Math.random() * 2 - 1).toFixed(3)
-})))
+const tableData = ref<any[]>([])
 
 // 2. Line Chart Data (Trend)
 const lineChartData = ref<number[]>([])
@@ -42,52 +46,148 @@ const lineChartXAxis = ref<string[]>([])
 const scatterChartData = ref<number[][]>([])
 
 // 4. Histogram Data (PCL)
-const histData = ref<number[]>([12, 30, 45, 20, 17])
-const histCategories = ['0-10%', '10-20%', '20-30%', '30-40%', '>40%']
+const histData = ref<number[]>([])
+const histCategories = ref<string[]>([])
 
 // 5. Heatmap Data (Correlation)
 const heatmapData = ref<number[][]>([])
-const heatmapLabels = Array.from({ length: 8 }, (_, i) => `F${i + 1}`)
+const heatmapLabels = ref<string[]>([])
 
-const handleSearch = () => {
-  // TODO: Fetch real data based on batteryId
-  console.log('Searching for battery:', batteryId.value)
-  // Simulate data refresh
-  generateMockData()
+const loading = ref(false)
+
+// Initialize: Fetch datasets and batteries
+const initData = async () => {
+  try {
+    // 1. Get Datasets (MVP: Built-in only)
+    const datasets = await getDatasets()
+    if (datasets.length > 0) {
+      const datasetId = datasets[0].id // Default to first dataset
+
+      // 2. Get Batteries
+      const batteries = await getBatteries(datasetId)
+      batteryOptions.value = batteries.map((b: BatteryUnit) => ({
+        value: b.id,
+        label: `${b.battery_code} (Cycles: ${b.total_cycles})`
+      }))
+
+      if (batteryOptions.value.length > 0) {
+        batteryId.value = batteryOptions.value[0].value
+        // 3. Load Analysis Data
+        await handleSearch()
+      }
+    }
+  } catch (error) {
+    console.error('Failed to init data:', error)
+  }
+}
+
+const handleSearch = async () => {
+  if (!batteryId.value) return
+
+  loading.value = true
+  try {
+    const id = batteryId.value
+
+    // 1. Stats
+    const stats = await getBatteryStats(id)
+    tableData.value = stats.map(s => ({
+      name: s.feature_name,
+      mean: s.mean.toFixed(4),
+      variance: s.variance.toFixed(4),
+      min: s.min_val.toFixed(4),
+      max: s.max_val.toFixed(4),
+      r2_rul: s.corr_rul?.toFixed(4) || 'N/A',
+      r2_pcl: s.corr_pcl?.toFixed(4) || 'N/A'
+    }))
+
+    // 2. Trend
+    await updateTrendChart()
+
+    // 3. Scatter
+    await updateScatterChart()
+
+    // 4. PCL Distribution
+    const pclDist = await getPCLDistribution(id)
+    // Simple binning for histogram
+    const values = pclDist.pcl_values
+    if (values.length > 0) {
+      const min = Math.min(...values)
+      const max = Math.max(...values)
+      const binCount = 10
+      const step = (max - min) / binCount
+
+      const bins = new Array(binCount).fill(0)
+      const categories: string[] = []
+
+      for (let i = 0; i < binCount; i++) {
+        const start = min + i * step
+        const end = min + (i + 1) * step
+        categories.push(`${start.toFixed(2)}-${end.toFixed(2)}`)
+      }
+
+      values.forEach(v => {
+        const index = Math.min(Math.floor((v - min) / step), binCount - 1)
+        bins[index]++
+      })
+
+      histData.value = bins
+      histCategories.value = categories
+    } else {
+      histData.value = []
+      histCategories.value = []
+    }
+
+    // 5. Correlation Matrix
+    const matrix = await getCorrelationMatrix(id)
+    heatmapLabels.value = matrix.features
+    const heatData: number[][] = []
+    matrix.matrix.forEach((row, i) => {
+      row.forEach((val, j) => {
+        heatData.push([i, j, parseFloat(val.toFixed(2))])
+      })
+    })
+    heatmapData.value = heatData
+
+  } catch (error) {
+    console.error('Analysis failed:', error)
+    ElMessage.error('获取分析数据失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+const updateTrendChart = async () => {
+  if (!batteryId.value) return
+  try {
+    const trend = await getTrendData(batteryId.value, selectedFeature.value)
+    lineChartXAxis.value = trend.cycles.map(String)
+    lineChartData.value = trend.values
+  } catch (error) {
+    console.error(error)
+  }
+}
+
+const updateScatterChart = async () => {
+  if (!batteryId.value) return
+  try {
+    const scatter = await getScatterData(batteryId.value, selectedRulFeature.value)
+    scatterChartData.value = scatter.points
+  } catch (error) {
+    console.error(error)
+  }
 }
 
 const handleFeatureChange = () => {
-  // Update line chart data based on selected feature
-  // Mocking update:
-  lineChartData.value = Array.from({ length: 50 }, () => Math.random() * 10)
+  updateTrendChart()
 }
 
 const handleRulFeatureChange = () => {
-  // Update scatter chart data based on selected feature
-  // Mocking update:
-  scatterChartData.value = Array.from({ length: 50 }, () => [Math.random() * 5, Math.random() * 1000])
-}
-
-const generateMockData = () => {
-  // Line Chart
-  lineChartXAxis.value = Array.from({ length: 50 }, (_, i) => `${i * 20}`)
-  lineChartData.value = Array.from({ length: 50 }, () => Math.random() * 10)
-
-  // Scatter Chart
-  scatterChartData.value = Array.from({ length: 50 }, () => [Math.random() * 5, Math.random() * 1000])
-
-  // Heatmap
-  const data: number[][] = []
-  for (let i = 0; i < 8; i++) {
-    for (let j = 0; j < 8; j++) {
-      data.push([i, j, parseFloat((Math.random() * 2 - 1).toFixed(2))])
-    }
-  }
-  heatmapData.value = data
+  updateScatterChart()
 }
 
 // Utility for conditional formatting
 const getCorrelationStyle = (value: string) => {
+  if (value === 'N/A') return {}
   const num = parseFloat(value)
   if (Math.abs(num) > 0.7) {
     return { color: '#F56C6C', fontWeight: 'bold' } // Red for high correlation
@@ -96,12 +196,12 @@ const getCorrelationStyle = (value: string) => {
 }
 
 onMounted(() => {
-  generateMockData()
+  initData()
 })
 </script>
 
 <template>
-  <div class="analysis-container">
+  <div class="analysis-container" v-loading="loading">
     <!-- 1. Top Header Controls -->
     <el-card shadow="hover" class="header-card">
       <div class="header-content">
