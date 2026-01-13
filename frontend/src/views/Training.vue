@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ref, reactive, onMounted, watch, onUnmounted, nextTick } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import * as echarts from 'echarts'
 import { getDatasets, getBatteries } from '../api/data'
 import { getAlgorithms } from '../api/models'
-import { createTrainingJob, listTrainingJobs } from '../api/training'
-import type { Dataset, BatteryUnit, Algorithm, CreateTrainingJobRequest, BatterySelection, TrainingJobResponse } from '../api/types'
+import { createTrainingJob, listTrainingJobs, getTrainingJob, deleteTrainingJob } from '../api/training'
+import type { Dataset, BatteryUnit, Algorithm, CreateTrainingJobRequest, BatterySelection, TrainingJobResponse, TrainingJobDetailResponse, TrainingLog } from '../api/types'
 
 defineOptions({
   name: 'TrainingView'
@@ -27,7 +28,8 @@ const form = reactive({
   lr: 0.001,
   dropout_rate: 0.2,
   seq_len: 1,
-  perc_val: 0.2
+  perc_val: 0.2,
+  splitRatio: 0.8 // Train ratio (Train / (Train + Val))
 })
 
 // Battery Selection Table Data
@@ -38,6 +40,99 @@ const batteryTableData = ref<BatteryRow[]>([])
 
 const isSubmitting = ref(false)
 const activeTab = ref('config') // 'config' | 'monitor'
+
+// --- Detail Dialog ---
+const detailVisible = ref(false)
+const currentJob = ref<TrainingJobDetailResponse | null>(null)
+const detailActiveTab = ref('overview')
+const logs = ref<TrainingLog[]>([])
+const chartInstance = ref<echarts.ECharts | null>(null)
+const chartRef = ref<HTMLElement | null>(null)
+
+// --- WebSocket ---
+const ws = ref<WebSocket | null>(null)
+const wsJobId = ref<number | null>(null)
+
+const connectWebSocket = (jobId: number) => {
+  if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+    ws.value.close()
+  }
+
+  const wsUrl = `ws://localhost:8000/api/v1/training/ws/jobs/${jobId}`
+  ws.value = new WebSocket(wsUrl)
+  wsJobId.value = jobId
+
+  ws.value.onopen = () => {
+    console.log(`WebSocket connected for job ${jobId}`)
+  }
+
+  ws.value.onmessage = (event) => {
+    const message = JSON.parse(event.data)
+
+    // Update list view
+    const jobIndex = trainingJobs.value.findIndex(j => j.id === jobId)
+    if (jobIndex !== -1) {
+      const job = trainingJobs.value[jobIndex]
+      if (message.type === 'job_progress') {
+        // Force reactivity update
+        trainingJobs.value[jobIndex] = { ...job, progress: message.progress }
+      }
+      if (message.type === 'job_status_change') {
+        trainingJobs.value[jobIndex] = { ...job, status: message.status }
+      }
+    }
+
+    // Update detail view if open
+    if (detailVisible.value && currentJob.value?.job.id === jobId) {
+      handleDetailMessage(message)
+    }
+  }
+
+  ws.value.onclose = () => {
+    console.log(`WebSocket disconnected for job ${jobId}`)
+    if (wsJobId.value === jobId) {
+      ws.value = null
+      wsJobId.value = null
+    }
+  }
+}
+
+const handleDetailMessage = (message: any) => {
+  switch (message.type) {
+    case 'log':
+      logs.value.push({
+        timestamp: new Date().toISOString(),
+        level: message.level || 'INFO',
+        message: message.message
+      })
+      // Auto scroll to bottom
+      nextTick(() => {
+        const container = document.querySelector('.log-container')
+        if (container) container.scrollTop = container.scrollHeight
+      })
+      break
+    case 'epoch_progress':
+      // Update chart
+      if (chartInstance.value) {
+        const option = chartInstance.value.getOption() as any
+        // Assuming message contains { epoch, train_loss, val_loss }
+        if (message.train_loss !== undefined) {
+          option.series[0].data.push([message.epoch, message.train_loss])
+          if (message.val_loss !== undefined) {
+            option.series[1].data.push([message.epoch, message.val_loss])
+          }
+          chartInstance.value.setOption(option)
+        }
+      }
+      // Update run status in overview
+      if (currentJob.value && currentJob.value.runs.length > 0) {
+        // Simplified: Assume first run for now
+        const run = currentJob.value.runs[0]
+        run.current_epoch = message.epoch
+      }
+      break
+  }
+}
 
 // --- Methods ---
 
@@ -56,6 +151,12 @@ const initData = async () => {
       form.datasetId = datasets.value[0].id
       await handleDatasetChange()
     }
+
+    // Connect to the first running job if any
+    const runningJob = trainingJobs.value.find(j => j.status === 'RUNNING')
+    if (runningJob) {
+      connectWebSocket(runningJob.id)
+    }
   } catch (error) {
     console.error('Init failed:', error)
   }
@@ -66,23 +167,32 @@ const handleDatasetChange = async () => {
   try {
     const res = await getBatteries(form.datasetId)
     batteries.value = res
-    // Initialize battery table with default roles
-    // Simple logic: 60% train, 20% val, 20% test
-    const total = res.length
-    const trainCount = Math.floor(total * 0.6)
-    const valCount = Math.floor(total * 0.2)
-
-    batteryTableData.value = res.map((b, index) => {
-      let role: 'train' | 'val' | 'test' = 'test'
-      if (index < trainCount) role = 'train'
-      else if (index < trainCount + valCount) role = 'val'
-
-      return { ...b, role }
-    })
+    updateBatteryRoles()
   } catch (error) {
     console.error('Fetch batteries failed:', error)
   }
 }
+
+const updateBatteryRoles = () => {
+  const total = batteries.value.length
+  if (total === 0) return
+
+  const testCount = Math.floor(total * 0.2)
+  const remaining = total - testCount
+  const trainCount = Math.floor(remaining * form.splitRatio)
+
+  batteryTableData.value = batteries.value.map((b, index) => {
+    let role: 'train' | 'val' | 'test' = 'test'
+    if (index < trainCount) role = 'train'
+    else if (index < trainCount + (remaining - trainCount)) role = 'val'
+    else role = 'test'
+    return { ...b, role }
+  })
+}
+
+watch(() => form.splitRatio, () => {
+  updateBatteryRoles()
+})
 
 const handleSubmit = async () => {
   if (!form.datasetId) {
@@ -94,13 +204,9 @@ const handleSubmit = async () => {
     return
   }
 
-  // Filter selected batteries
   const selectedBatteries = batteryTableData.value
     .filter(b => b.role !== 'ignore')
-    .map(b => ({
-      battery_id: b.id,
-      split_role: b.role as 'train' | 'val' | 'test'
-    }))
+    .map(b => ({ battery_id: b.id, split_role: b.role as 'train' | 'val' | 'test' }))
 
   if (selectedBatteries.length === 0) {
     ElMessage.warning('请至少选择一个电池用于训练')
@@ -119,21 +225,93 @@ const handleSubmit = async () => {
       lr: form.lr,
       dropout_rate: form.dropout_rate,
       seq_len: form.seq_len,
-      perc_val: form.perc_val
+      perc_val: 1 - form.splitRatio
     }
 
-    await createTrainingJob(payload)
+    const newJob = await createTrainingJob(payload)
     ElMessage.success('训练任务创建成功')
-    // Refresh job list and switch tab
+
     const jobsRes = await listTrainingJobs({ limit: 10 })
     trainingJobs.value = jobsRes
     activeTab.value = 'monitor'
+
+    connectWebSocket(newJob.id)
   } catch (error) {
     console.error('Create job failed:', error)
     ElMessage.error('创建任务失败')
   } finally {
     isSubmitting.value = false
   }
+}
+
+const showDetail = async (jobId: number) => {
+  try {
+    const res = await getTrainingJob(jobId)
+    currentJob.value = res
+    detailVisible.value = true
+    logs.value = [] // Clear logs
+
+    // If job is running, ensure WS is connected
+    if (res.job.status === 'RUNNING' && wsJobId.value !== jobId) {
+      connectWebSocket(jobId)
+    }
+
+    // Fetch historical logs if needed (simplified here)
+    // const logRes = await getTrainingLogs(jobId, res.runs[0].id)
+    // logs.value = logRes.logs
+
+    // Init Chart after dialog opens
+    nextTick(() => {
+      initChart()
+    })
+  } catch (error) {
+    console.error('Get job detail failed:', error)
+    ElMessage.error('获取任务详情失败')
+  }
+}
+
+const handleDelete = async (jobId: number) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除训练任务 #${jobId} 吗？`,
+      '警告',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+
+    await deleteTrainingJob(jobId)
+    ElMessage.success('删除成功')
+
+    // Refresh list
+    trainingJobs.value = trainingJobs.value.filter(j => j.id !== jobId)
+
+  } catch (error) {
+    // If user clicks cancel, error will be 'cancel'
+    if (error !== 'cancel') {
+      console.error('Delete job failed:', error)
+      ElMessage.error('删除失败')
+    }
+  }
+}
+
+const initChart = () => {
+  if (!chartRef.value) return
+
+  chartInstance.value = echarts.init(chartRef.value)
+  chartInstance.value.setOption({
+    title: { text: 'Training Loss' },
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['Train Loss', 'Val Loss'] },
+    xAxis: { type: 'value', name: 'Epoch' },
+    yAxis: { type: 'value', name: 'Loss' },
+    series: [
+      { name: 'Train Loss', type: 'line', data: [] },
+      { name: 'Val Loss', type: 'line', data: [] }
+    ]
+  })
 }
 
 const getStatusType = (status: string) => {
@@ -147,6 +325,15 @@ const getStatusType = (status: string) => {
 
 onMounted(() => {
   initData()
+})
+
+onUnmounted(() => {
+  if (ws.value) {
+    ws.value.close()
+  }
+  if (chartInstance.value) {
+    chartInstance.value.dispose()
+  }
 })
 </script>
 
@@ -179,6 +366,23 @@ onMounted(() => {
                       {{ algo.name }}
                     </el-checkbox>
                   </el-checkbox-group>
+                </el-form-item>
+
+                <el-form-item label="数据集划分">
+                  <div class="slider-container">
+                    <span class="slider-label">训练集占比 ({{ (form.splitRatio * 100).toFixed(0) }}%)</span>
+                    <el-slider
+                      v-model="form.splitRatio"
+                      :step="0.05"
+                      :min="0.5"
+                      :max="0.9"
+                      show-input
+                      :format-tooltip="(val: number) => `${(val * 100).toFixed(0)}%`"
+                    />
+                  </div>
+                  <div class="slider-hint">
+                    剩余部分将自动分配给验证集。测试集固定保留 20%。
+                  </div>
                 </el-form-item>
               </el-form>
             </el-card>
@@ -222,6 +426,12 @@ onMounted(() => {
           <!-- Right: Battery Selection -->
           <el-col :span="12">
             <el-card shadow="never" header="电池数据集划分">
+              <template #header>
+                <div class="card-header">
+                  <span>电池数据集划分</span>
+                  <el-tag type="info" size="small">共 {{ batteryTableData.length }} 组</el-tag>
+                </div>
+              </template>
               <el-table :data="batteryTableData" height="500" border stripe>
                 <el-table-column prop="battery_code" label="电池编号" width="120" />
                 <el-table-column prop="total_cycles" label="循环次数" width="100" />
@@ -268,14 +478,60 @@ onMounted(() => {
             </template>
           </el-table-column>
           <el-table-column label="操作" width="150">
-            <template #default>
-              <el-button size="small" type="primary" link>查看详情</el-button>
-              <el-button size="small" type="danger" link>删除</el-button>
+            <template #default="scope">
+              <el-button size="small" type="primary" link @click="showDetail(scope.row.id)">查看详情</el-button>
+              <el-button size="small" type="danger" link @click="handleDelete(scope.row.id)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- Detail Dialog -->
+    <el-dialog v-model="detailVisible" title="任务详情" width="80%" destroy-on-close>
+      <div v-if="currentJob">
+        <el-descriptions border>
+          <el-descriptions-item label="任务ID">{{ currentJob.job.id }}</el-descriptions-item>
+          <el-descriptions-item label="目标">{{ currentJob.job.target }}</el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <el-tag :type="getStatusType(currentJob.job.status)">{{ currentJob.job.status }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="进度">{{ (currentJob.job.progress * 100).toFixed(1) }}%</el-descriptions-item>
+        </el-descriptions>
+
+        <el-tabs v-model="detailActiveTab" class="mt-20">
+          <el-tab-pane label="概览" name="overview">
+            <el-table :data="currentJob.runs" border stripe>
+              <el-table-column prop="algorithm" label="算法" />
+              <el-table-column prop="status" label="状态">
+                <template #default="scope">
+                  <el-tag :type="getStatusType(scope.row.status)">{{ scope.row.status }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="Epoch">
+                <template #default="scope">
+                  {{ scope.row.current_epoch }} / {{ scope.row.total_epochs }}
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+
+          <el-tab-pane label="实时指标" name="metrics">
+            <div ref="chartRef" style="width: 100%; height: 400px;"></div>
+          </el-tab-pane>
+
+          <el-tab-pane label="日志" name="logs">
+            <div class="log-container">
+              <div v-for="(log, index) in logs" :key="index" class="log-item">
+                <span class="log-time">[{{ log.timestamp }}]</span>
+                <span :class="['log-level', `log-${log.level.toLowerCase()}`]">{{ log.level }}</span>
+                <span class="log-msg">{{ log.message }}</span>
+              </div>
+            </div>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -288,4 +544,50 @@ onMounted(() => {
   justify-content: center;
   padding: 20px 0;
 }
+.slider-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.slider-label {
+  font-size: 12px;
+  color: #606266;
+  width: 100px;
+}
+.slider-hint {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 5px;
+}
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.log-container {
+  height: 400px;
+  overflow-y: auto;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 10px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  border-radius: 4px;
+}
+.log-item {
+  margin-bottom: 2px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.log-time {
+  color: #569cd6;
+  margin-right: 8px;
+}
+.log-level {
+  margin-right: 8px;
+  font-weight: bold;
+}
+.log-info { color: #4ec9b0; }
+.log-warning { color: #ce9178; }
+.log-error { color: #f44747; }
 </style>
