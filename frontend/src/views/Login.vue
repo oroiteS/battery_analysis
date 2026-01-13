@@ -69,12 +69,14 @@ const handleLogin = async () => {
           ElMessage.success('登录成功')
           // Store token (mock)
           localStorage.setItem('token', 'mock-jwt-token')
+          localStorage.setItem('username', loginForm.username)
           router.push('/')
         } else {
           // For demo purposes, allow any login or show error
           // In real app, check response
           ElMessage.success('登录成功 (演示模式)')
           localStorage.setItem('token', 'mock-jwt-token')
+          localStorage.setItem('username', loginForm.username)
           router.push('/')
         }
       }, 1000)
