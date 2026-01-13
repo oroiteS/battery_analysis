@@ -7,7 +7,8 @@ export const login = (data: LoginData) => {
   params.append('username', data.username)
   params.append('password', data.password)
 
-  return service.post<TokenResponse>('/v1/auth/login', params, {
+  // Axios response interceptor unwraps response.data, so we return Promise<TokenResponse>
+  return service.post<any, TokenResponse>('/v1/auth/login', params, {
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded'
     }
@@ -15,11 +16,11 @@ export const login = (data: LoginData) => {
 }
 
 export const register = (data: RegisterData) => {
-  return service.post<UserResponse>('/v1/auth/register', data)
+  return service.post<any, UserResponse>('/v1/auth/register', data)
 }
 
 export const getMe = () => {
-  return service.get<UserResponse>('/v1/auth/me')
+  return service.get<any, UserResponse>('/v1/auth/me')
 }
 
 export const logout = () => {
