@@ -427,6 +427,27 @@ paths:
                       items:
                         type: number
 
+  /data/batteries/{battery_id}/export-report:
+    get:
+      tags: [Analysis]
+      summary: 导出分析报告 (Excel)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: battery_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+
   # ==========================================
   # Training
   # ==========================================
