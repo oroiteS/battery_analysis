@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import * as echarts from 'echarts'
+import { ref } from 'vue'
 
 // Placeholder for Dashboard stats
 const stats = ref([
@@ -28,7 +27,7 @@ const stats = ref([
         </el-card>
       </el-col>
     </el-row>
-    
+
     <el-row :gutter="20" style="margin-top: 20px;">
       <el-col :span="16">
         <el-card shadow="hover" header="系统概况">
