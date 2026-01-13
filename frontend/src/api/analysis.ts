@@ -30,3 +30,9 @@ export const getPCLDistribution = (batteryId: number) => {
 export const getCorrelationMatrix = (batteryId: number) => {
   return service.get<any, CorrelationMatrix>(`/v1/data/batteries/${batteryId}/correlation-matrix`)
 }
+
+export const exportAnalysisReport = (batteryId: number) => {
+  return service.get(`/v1/data/batteries/${batteryId}/export-report`, {
+    responseType: 'blob'
+  })
+}
