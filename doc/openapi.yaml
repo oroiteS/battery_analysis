@@ -37,7 +37,7 @@ paths:
   # ==========================================
   # Authentication
   # ==========================================
-  /v1/auth/register:
+  /auth/register:
     post:
       tags: [Authentication]
       summary: 用户注册
@@ -53,13 +53,27 @@ paths:
                   type: string
                 email:
                   type: string
+                  format: email
                 password:
                   type: string
       responses:
         "201":
           description: 注册成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  user_name:
+                    type: string
+                  email:
+                    type: string
+        "409":
+          description: 邮箱已被注册
 
-  /v1/auth/login:
+  /auth/login:
     post:
       tags: [Authentication]
       summary: 用户登录
@@ -69,16 +83,29 @@ paths:
           application/x-www-form-urlencoded:
             schema:
               type: object
+              required: [username, password]
               properties:
                 username:
                   type: string
+                  description: 用户邮箱
                 password:
                   type: string
       responses:
         "200":
           description: 登录成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+        "401":
+          description: 用户名或密码错误
 
-  /v1/auth/me:
+  /auth/me:
     get:
       tags: [Authentication]
       summary: 获取当前用户信息
@@ -87,8 +114,19 @@ paths:
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  user_name:
+                    type: string
+                  email:
+                    type: string
 
-  /v1/auth/logout:
+  /auth/logout:
     post:
       tags: [Authentication]
       summary: 用户登出
@@ -101,20 +139,39 @@ paths:
   # ==========================================
   # Data Management
   # ==========================================
-  /v1/data/datasets:
+  /data/datasets:
     get:
       tags: [Data Management]
       summary: 获取数据集列表
+      description: MVP版本仅返回内置数据集
       security:
         - BearerAuth: []
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    name:
+                      type: string
+                    source_type:
+                      type: string
+                    battery_count:
+                      type: integer
+                    created_at:
+                      type: string
+                      format: date-time
 
-  /v1/data/datasets/{dataset_id}/batteries:
+  /data/datasets/{dataset_id}/batteries:
     get:
       tags: [Data Management]
-      summary: 获取电池列表
+      summary: 获取数据集中的电池列表
       security:
         - BearerAuth: []
       parameters:
@@ -126,11 +183,30 @@ paths:
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    battery_code:
+                      type: string
+                    group_tag:
+                      type: string
+                      nullable: true
+                    total_cycles:
+                      type: integer
+                    nominal_capacity:
+                      type: number
+                      nullable: true
 
-  /v1/data/batteries/{battery_id}/cycles:
+  /data/batteries/{battery_id}/cycles:
     get:
       tags: [Data Management]
-      summary: 获取循环数据
+      summary: 获取电池的循环数据
       security:
         - BearerAuth: []
       parameters:
@@ -143,21 +219,54 @@ paths:
           in: query
           schema:
             type: integer
+            default: 0
         - name: limit
           in: query
           schema:
             type: integer
+            default: 100
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    cycle_num:
+                      type: integer
+                    feature_1:
+                      type: number
+                    feature_2:
+                      type: number
+                    feature_3:
+                      type: number
+                    feature_4:
+                      type: number
+                    feature_5:
+                      type: number
+                    feature_6:
+                      type: number
+                    feature_7:
+                      type: number
+                    feature_8:
+                      type: number
+                    pcl:
+                      type: number
+                      nullable: true
+                    rul:
+                      type: integer
+                      nullable: true
 
   # ==========================================
   # Analysis
   # ==========================================
-  /v1/data/batteries/{battery_id}/stats:
+  /analysis/{battery_id}/stats:
     get:
       tags: [Analysis]
-      summary: 获取特征统计
+      summary: 获取特征统计 (8x6表格)
       security:
         - BearerAuth: []
       parameters:
@@ -169,11 +278,34 @@ paths:
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    feature_name:
+                      type: string
+                    mean:
+                      type: number
+                    variance:
+                      type: number
+                    min_val:
+                      type: number
+                    max_val:
+                      type: number
+                    corr_rul:
+                      type: number
+                      nullable: true
+                    corr_pcl:
+                      type: number
+                      nullable: true
 
-  /v1/data/batteries/{battery_id}/trend:
+  /analysis/{battery_id}/trend:
     get:
       tags: [Analysis]
-      summary: 获取趋势数据
+      summary: 获取趋势图数据
       security:
         - BearerAuth: []
       parameters:
@@ -187,14 +319,28 @@ paths:
           required: true
           schema:
             type: string
+            pattern: "^feature_[1-8]$"
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cycles:
+                    type: array
+                    items:
+                      type: integer
+                  values:
+                    type: array
+                    items:
+                      type: number
 
-  /v1/data/batteries/{battery_id}/scatter:
+  /analysis/{battery_id}/scatter:
     get:
       tags: [Analysis]
-      summary: 获取散点图数据
+      summary: 获取散点图数据 (RUL vs Feature)
       security:
         - BearerAuth: []
       parameters:
@@ -207,14 +353,28 @@ paths:
           in: query
           schema:
             type: string
+            default: "feature_1"
+            pattern: "^feature_[1-8]$"
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  points:
+                    type: array
+                    items:
+                      type: array
+                      items:
+                        type: number
+                    description: "[[x, y], [x, y]]"
 
-  /v1/data/batteries/{battery_id}/pcl-distribution:
+  /analysis/{battery_id}/pcl-distribution:
     get:
       tags: [Analysis]
-      summary: 获取PCL分布
+      summary: 获取PCL分布数据
       security:
         - BearerAuth: []
       parameters:
@@ -226,11 +386,20 @@ paths:
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pcl_values:
+                    type: array
+                    items:
+                      type: number
 
-  /v1/data/batteries/{battery_id}/correlation-matrix:
+  /analysis/{battery_id}/correlation-matrix:
     get:
       tags: [Analysis]
-      summary: 获取相关性矩阵
+      summary: 获取相关性矩阵 (热力图)
       security:
         - BearerAuth: []
       parameters:
@@ -242,11 +411,26 @@ paths:
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  features:
+                    type: array
+                    items:
+                      type: string
+                  matrix:
+                    type: array
+                    items:
+                      type: array
+                      items:
+                        type: number
 
   # ==========================================
   # Training
   # ==========================================
-  /v1/training/jobs:
+  /training/jobs:
     post:
       tags: [Training]
       summary: 创建训练任务
@@ -258,11 +442,13 @@ paths:
           application/json:
             schema:
               type: object
+              required: [dataset_id, target, algorithms, batteries]
               properties:
                 dataset_id:
                   type: integer
                 target:
                   type: string
+                  enum: [RUL, PCL, BOTH]
                 algorithms:
                   type: array
                   items:
@@ -271,9 +457,92 @@ paths:
                   type: array
                   items:
                     type: object
+                    properties:
+                      battery_id:
+                        type: integer
+                      split_role:
+                        type: string
+                        enum: [train, val, test]
+                # Hyperparameters
+                seq_len:
+                  type: integer
+                  default: 1
+                perc_val:
+                  type: number
+                  default: 0.2
+                num_layers:
+                  type: array
+                  items:
+                    type: integer
+                  default: [2]
+                num_neurons:
+                  type: array
+                  items:
+                    type: integer
+                  default: [128]
+                num_epoch:
+                  type: integer
+                  default: 2000
+                batch_size:
+                  type: integer
+                  default: 1024
+                lr:
+                  type: number
+                  default: 0.001
+                dropout_rate:
+                  type: number
+                  default: 0.2
+                weight_decay:
+                  type: number
+                  default: 0.0
+                step_size:
+                  type: integer
+                  default: 50000
+                gamma:
+                  type: number
+                  default: 0.1
+                lr_scheduler:
+                  type: string
+                  default: StepLR
+                min_lr:
+                  type: number
+                  default: 1e-6
+                grad_clip:
+                  type: number
+                  default: 0.0
+                early_stopping_patience:
+                  type: integer
+                  default: 0
+                monitor_metric:
+                  type: string
+                  default: val_loss
+                num_rounds:
+                  type: integer
+                  default: 5
+                random_seed:
+                  type: integer
+                  default: 1234
+                inputs_dynamical:
+                  type: string
+                  default: "s_norm, t_norm"
+                inputs_dim_dynamical:
+                  type: string
+                  default: "inputs_dim"
+                loss_mode:
+                  type: string
+                  default: Sum
+                loss_weights:
+                  type: array
+                  items:
+                    type: number
+                  default: [1.0, 1.0, 1.0]
       responses:
         "201":
           description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingJobResponse'
 
     get:
       tags: [Training]
@@ -289,15 +558,23 @@ paths:
           in: query
           schema:
             type: integer
+            default: 20
         - name: offset
           in: query
           schema:
             type: integer
+            default: 0
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TrainingJobResponse'
 
-  /v1/training/jobs/{job_id}:
+  /training/jobs/{job_id}:
     get:
       tags: [Training]
       summary: 获取训练任务详情
@@ -312,10 +589,34 @@ paths:
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job:
+                    $ref: '#/components/schemas/TrainingJobResponse'
+                  runs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TrainingRunResponse'
+                  batteries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        battery_id:
+                          type: integer
+                        battery_code:
+                          type: string
+                        split_role:
+                          type: string
+                        total_cycles:
+                          type: integer
 
     delete:
       tags: [Training]
-      summary: 删除训练任务
+      summary: 删除训练任务 (软删除)
       security:
         - BearerAuth: []
       parameters:
@@ -328,7 +629,7 @@ paths:
         "204":
           description: 删除成功
 
-  /v1/training/jobs/{job_id}/runs/{run_id}/metrics:
+  /training/jobs/{job_id}/runs/{run_id}/metrics:
     get:
       tags: [Training]
       summary: 获取训练指标
@@ -348,22 +649,33 @@ paths:
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: integer
+                  algorithm:
+                    type: string
+                  metrics:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        epoch:
+                          type: integer
+                        train_loss:
+                          type: number
+                        val_loss:
+                          type: number
+                        metrics:
+                          type: object
 
-  /v1/training/jobs/{job_id}/runs/{run_id}/logs:
+  /training/jobs/{job_id}/runs/{run_id}/logs:
     get:
       tags: [Training]
-      summary: 获取训练日志（从文件读取）
-      description: |
-        从日志文件读取训练日志
-
-        返回格式:
-        - run_id: 运行ID
-        - log_file_path: 日志文件路径
-        - total_lines: 文件总行数
-        - returned_lines: 返回的日志行数
-        - logs: 日志数组，每条包含 timestamp, level, message
-
-        注意: 日志现在存储在文件中，不再存储在数据库
+      summary: 获取训练日志 (从文件读取)
       security:
         - BearerAuth: []
       parameters:
@@ -379,12 +691,10 @@ paths:
             type: integer
         - name: level
           in: query
-          description: 按日志级别过滤 (DEBUG/INFO/WARNING/ERROR)
           schema:
             type: string
         - name: limit
           in: query
-          description: 返回最新的N条日志，默认1000
           schema:
             type: integer
             default: 1000
@@ -400,13 +710,11 @@ paths:
                     type: integer
                   log_file_path:
                     type: string
-                    description: 日志文件相对路径
+                    nullable: true
                   total_lines:
                     type: integer
-                    description: 文件总行数
                   returned_lines:
                     type: integer
-                    description: 返回的日志行数
                   logs:
                     type: array
                     items:
@@ -420,12 +728,11 @@ paths:
                           type: string
                   message:
                     type: string
-                    description: 当日志文件不存在时的提示信息
 
   # ==========================================
   # Models
   # ==========================================
-  /v1/models/versions:
+  /models/versions:
     get:
       tags: [Models]
       summary: 列出模型版本
@@ -440,15 +747,23 @@ paths:
           in: query
           schema:
             type: integer
+            default: 20
         - name: offset
           in: query
           schema:
             type: integer
+            default: 0
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModelVersionResponse'
 
-  /v1/models/versions/{version_id}:
+  /models/versions/{version_id}:
     get:
       tags: [Models]
       summary: 获取模型详情
@@ -463,10 +778,20 @@ paths:
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  model:
+                    $ref: '#/components/schemas/ModelVersionResponse'
+                  training_info:
+                    type: object
+                    nullable: true
 
     delete:
       tags: [Models]
-      summary: 删除模型版本
+      summary: 删除模型版本 (软删除)
       security:
         - BearerAuth: []
       parameters:
@@ -479,7 +804,7 @@ paths:
         "204":
           description: 删除成功
 
-  /v1/models/versions/{version_id}/download:
+  /models/versions/{version_id}/download:
     get:
       tags: [Models]
       summary: 下载模型checkpoint
@@ -494,8 +819,13 @@ paths:
       responses:
         "200":
           description: 成功
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
 
-  /v1/models/algorithms:
+  /models/algorithms:
     get:
       tags: [Models]
       summary: 获取支持的算法列表
@@ -504,11 +834,29 @@ paths:
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  algorithms:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code:
+                          type: string
+                        name:
+                          type: string
+                        description:
+                          type: string
+                        supported:
+                          type: boolean
 
   # ==========================================
   # Testing
   # ==========================================
-  /v1/testing/jobs:
+  /testing/jobs:
     post:
       tags: [Testing]
       summary: 创建测试任务
@@ -520,6 +868,7 @@ paths:
           application/json:
             schema:
               type: object
+              required: [model_version_id, dataset_id, target, battery_ids]
               properties:
                 model_version_id:
                   type: integer
@@ -527,15 +876,21 @@ paths:
                   type: integer
                 target:
                   type: string
+                  enum: [RUL, PCL, BOTH]
                 battery_ids:
                   type: array
                   items:
                     type: integer
                 horizon:
                   type: integer
+                  default: 1
       responses:
         "201":
           description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestJobResponse'
 
     get:
       tags: [Testing]
@@ -551,15 +906,23 @@ paths:
           in: query
           schema:
             type: integer
+            default: 20
         - name: offset
           in: query
           schema:
             type: integer
+            default: 0
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TestJobResponse'
 
-  /v1/testing/jobs/{job_id}:
+  /testing/jobs/{job_id}:
     get:
       tags: [Testing]
       summary: 获取测试任务详情
@@ -574,8 +937,28 @@ paths:
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job:
+                    $ref: '#/components/schemas/TestJobResponse'
+                  model_info:
+                    type: object
+                  batteries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        battery_id:
+                          type: integer
+                        battery_code:
+                          type: string
+                        total_cycles:
+                          type: integer
 
-  /v1/testing/jobs/{job_id}/metrics:
+  /testing/jobs/{job_id}/metrics:
     get:
       tags: [Testing]
       summary: 获取测试指标
@@ -590,8 +973,35 @@ paths:
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: integer
+                  overall_metrics:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        target:
+                          type: string
+                        metrics:
+                          type: object
+                  battery_metrics:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        battery_id:
+                          type: integer
+                        target:
+                          type: string
+                        metrics:
+                          type: object
 
-  /v1/testing/jobs/{job_id}/predictions:
+  /testing/jobs/{job_id}/predictions:
     get:
       tags: [Testing]
       summary: 获取预测结果
@@ -610,22 +1020,33 @@ paths:
       responses:
         "200":
           description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: integer
+                  predictions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        battery_id:
+                          type: integer
+                        cycle_num:
+                          type: integer
+                        target:
+                          type: string
+                        y_true:
+                          type: number
+                        y_pred:
+                          type: number
 
-  /v1/testing/jobs/{job_id}/logs:
+  /testing/jobs/{job_id}/logs:
     get:
       tags: [Testing]
-      summary: 获取测试日志（从文件读取）
-      description: |
-        从日志文件读取测试日志
-
-        返回格式:
-        - job_id: 测试任务ID
-        - log_file_path: 日志文件路径
-        - total_lines: 文件总行数
-        - returned_lines: 返回的日志行数
-        - logs: 日志数组，每条包含 timestamp, level, message
-
-        注意: 日志现在存储在文件中，不再存储在数据库
+      summary: 获取测试日志 (从文件读取)
       security:
         - BearerAuth: []
       parameters:
@@ -636,12 +1057,10 @@ paths:
             type: integer
         - name: level
           in: query
-          description: 按日志级别过滤 (DEBUG/INFO/WARNING/ERROR)
           schema:
             type: string
         - name: limit
           in: query
-          description: 返回最新的N条日志，默认1000
           schema:
             type: integer
             default: 1000
@@ -657,13 +1076,11 @@ paths:
                     type: integer
                   log_file_path:
                     type: string
-                    description: 日志文件相对路径
+                    nullable: true
                   total_lines:
                     type: integer
-                    description: 文件总行数
                   returned_lines:
                     type: integer
-                    description: 返回的日志行数
                   logs:
                     type: array
                     items:
@@ -677,9 +1094,8 @@ paths:
                           type: string
                   message:
                     type: string
-                    description: 当日志文件不存在时的提示信息
 
-  /v1/testing/jobs/{job_id}/export:
+  /testing/jobs/{job_id}/export:
     post:
       tags: [Testing]
       summary: 导出测试结果
@@ -696,14 +1112,26 @@ paths:
           schema:
             type: string
             enum: [CSV, XLSX]
+            default: CSV
       responses:
         "200":
           description: 导出任务已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  export_id:
+                    type: integer
+                  status:
+                    type: string
+                  message:
+                    type: string
 
   # ==========================================
   # WebSocket
   # ==========================================
-  /v1/training/ws/jobs/{job_id}:
+  /training/ws/jobs/{job_id}:
     get:
       tags: [WebSocket]
       summary: 训练任务WebSocket
@@ -711,15 +1139,10 @@ paths:
         实时接收训练进度
 
         消息类型:
-        - log: 日志消息（仅推送 WARNING 和 ERROR 级别）
-        - training_detail: Period级详情
+        - log: 日志消息
         - epoch_progress: Epoch进度
         - run_status_change: 状态变化
         - job_progress: 任务进度
-
-        注意:
-        - 完整日志存储在文件中，可通过日志API查询
-        - WebSocket仅推送关键日志（WARNING/ERROR）以减少网络流量
 
         连接: ws://localhost:8000/api/v1/training/ws/jobs/{job_id}
       parameters:
@@ -732,7 +1155,7 @@ paths:
         "101":
           description: 切换到WebSocket
 
-  /v1/testing/ws/jobs/{job_id}:
+  /testing/ws/jobs/{job_id}:
     get:
       tags: [WebSocket]
       summary: 测试任务WebSocket
@@ -740,13 +1163,9 @@ paths:
         实时接收测试进度
 
         消息类型:
-        - log: 日志消息（仅推送 WARNING 和 ERROR 级别）
+        - log: 日志消息
         - progress: 阶段进度
         - status_change: 状态变化
-
-        注意:
-        - 完整日志存储在文件中，可通过日志API查询
-        - WebSocket仅推送关键日志（WARNING/ERROR）以减少网络流量
 
         连接: ws://localhost:8000/api/v1/testing/ws/jobs/{job_id}
       parameters:
@@ -759,17 +1178,6 @@ paths:
         "101":
           description: 切换到WebSocket
 
-  # ==========================================
-  # Health Check
-  # ==========================================
-  /health:
-    get:
-      tags: [System]
-      summary: 健康检查
-      responses:
-        "200":
-          description: 服务正常
-
 components:
   securitySchemes:
     BearerAuth:
@@ -778,8 +1186,109 @@ components:
       bearerFormat: JWT
 
   schemas:
-    Error:
+    TrainingJobResponse:
       type: object
       properties:
-        detail:
+        id:
+          type: integer
+        user_id:
+          type: integer
+        dataset_id:
+          type: integer
+        target:
           type: string
+        hyperparams:
+          type: object
+        status:
+          type: string
+        progress:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    TrainingRunResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        job_id:
+          type: integer
+        algorithm:
+          type: string
+        status:
+          type: string
+        current_epoch:
+          type: integer
+        total_epochs:
+          type: integer
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ModelVersionResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        user_id:
+          type: integer
+        run_id:
+          type: integer
+        algorithm:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        config:
+          type: object
+        metrics:
+          type: object
+        checkpoint_path:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    TestJobResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        user_id:
+          type: integer
+        model_version_id:
+          type: integer
+        dataset_id:
+          type: integer
+        target:
+          type: string
+        horizon:
+          type: integer
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true

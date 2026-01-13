@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { logout } from '../api/auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,11 +22,17 @@ const handleLogout = () => {
     confirmButtonText: '确定',
     cancelButtonText: '取消',
     type: 'warning'
-  }).then(() => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('username')
-    ElMessage.success('已退出登录')
-    router.push('/login')
+  }).then(async () => {
+    try {
+      await logout()
+    } catch (e) {
+      console.error('Logout failed', e)
+    } finally {
+      localStorage.removeItem('token')
+      localStorage.removeItem('username')
+      ElMessage.success('已退出登录')
+      router.push('/login')
+    }
   }).catch(() => {
     // cancel
   })
