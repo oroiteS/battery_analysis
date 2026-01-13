@@ -10,12 +10,12 @@ import {
   getTrendData,
   getScatterData,
   getPCLDistribution,
-  getCorrelationMatrix
+  getCorrelationMatrix,
+  exportAnalysisReport
 } from '../api/analysis'
 import type { BatteryUnit } from '../api/types'
 import { ElMessage } from 'element-plus'
 
-// eslint-disable-next-line vue/multi-word-component-names
 defineOptions({
   name: 'DataAnalysisView'
 })
@@ -61,7 +61,7 @@ const initData = async () => {
   try {
     // 1. Get Datasets (MVP: Built-in only)
     const datasets = await getDatasets()
-    if (datasets[0] && datasets.length > 0) {
+    if (datasets && datasets[0] && datasets.length > 0) {
       const datasetId = datasets[0].id // Default to first dataset
 
       // 2. Get Batteries
@@ -72,7 +72,7 @@ const initData = async () => {
           label: `${b.battery_code} (Cycles: ${b.total_cycles})`
         }))
 
-        if (batteryOptions.value[0] && batteryOptions.value.length > 0) {
+        if (batteryOptions.value.length > 0 && batteryOptions.value[0]) {
           batteryId.value = batteryOptions.value[0].value
           // 3. Load Analysis Data
           await handleSearch()
@@ -198,6 +198,30 @@ const handleRulFeatureChange = () => {
   updateScatterChart()
 }
 
+const handleExport = async () => {
+  if (!batteryId.value) {
+    ElMessage.warning('请先选择电池组')
+    return
+  }
+
+  try {
+    const response = await exportAnalysisReport(batteryId.value)
+    // Create blob link to download
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const url = window.URL.createObjectURL(new Blob([response as any]))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `battery_${batteryId.value}_analysis_report.xlsx`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    ElMessage.success('导出成功')
+  } catch (error) {
+    console.error('Export failed:', error)
+    ElMessage.error('导出失败')
+  }
+}
+
 // Utility for conditional formatting
 const getCorrelationStyle = (value: string) => {
   if (value === 'N/A') return {}
@@ -230,7 +254,7 @@ onMounted(() => {
           </el-select>
         </div>
         <div class="right-panel">
-          <el-button type="primary" icon="Download">导出分析报告</el-button>
+          <el-button type="primary" icon="Download" @click="handleExport">导出分析报告</el-button>
         </div>
       </div>
     </el-card>
