@@ -75,7 +75,7 @@ const handleLogout = () => {
               <el-breadcrumb-item v-if="route.path !== '/'">{{ route.meta.title }}</el-breadcrumb-item>
             </el-breadcrumb>
           </div>
-          <el-dropdown trigger="click" @command="(command) => { if(command === 'logout') handleLogout() }">
+          <el-dropdown trigger="click" @command="(command: string | number | object) => { if(command === 'logout') handleLogout() }">
             <div class="user-info">
               <el-avatar :size="32" icon="UserFilled" />
               <span class="username">{{ username }}</span>
