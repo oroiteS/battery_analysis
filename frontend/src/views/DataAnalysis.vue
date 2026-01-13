@@ -18,6 +18,9 @@ const featureOptions = Array.from({ length: 8 }, (_, i) => ({
   label: `Feature ${i + 1}`
 }))
 
+// Feature selection for Scatter Chart (RUL)
+const selectedRulFeature = ref('feature_1')
+
 // --- Mock Data ---
 
 // 1. Statistical Table Data
@@ -57,6 +60,12 @@ const handleFeatureChange = () => {
   // Update line chart data based on selected feature
   // Mocking update:
   lineChartData.value = Array.from({ length: 50 }, () => Math.random() * 10)
+}
+
+const handleRulFeatureChange = () => {
+  // Update scatter chart data based on selected feature
+  // Mocking update:
+  scatterChartData.value = Array.from({ length: 50 }, () => [Math.random() * 5, Math.random() * 1000])
 }
 
 const generateMockData = () => {
@@ -151,9 +160,9 @@ onMounted(() => {
               </el-select>
             </div>
           </template>
-          <LineChart 
-            :data="lineChartData" 
-            :x-axis-data="lineChartXAxis" 
+          <LineChart
+            :data="lineChartData"
+            :x-axis-data="lineChartXAxis"
             y-axis-name="Value"
           />
         </el-card>
@@ -161,8 +170,16 @@ onMounted(() => {
 
       <!-- Top-Right: RUL Scatter -->
       <el-col :span="12">
-        <el-card shadow="hover" class="chart-card" header="RUL 关键因子分析 (Top Feature vs RUL)">
-           <ScatterChart 
+        <el-card shadow="hover" class="chart-card">
+          <template #header>
+            <div class="card-header">
+              <span>RUL 关键因子分析 (Top Feature vs RUL)</span>
+              <el-select v-model="selectedRulFeature" size="small" style="width: 120px" @change="handleRulFeatureChange">
+                <el-option v-for="opt in featureOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+              </el-select>
+            </div>
+          </template>
+           <ScatterChart
             :data="scatterChartData"
             x-axis-name="Feature Value"
             y-axis-name="RUL (Cycles)"
@@ -175,7 +192,7 @@ onMounted(() => {
       <!-- Bottom-Left: PCL Distribution -->
       <el-col :span="12">
         <el-card shadow="hover" class="chart-card" header="容量衰减分布 (PCL Distribution)">
-          <HistogramChart 
+          <HistogramChart
             :data="histData"
             :categories="histCategories"
           />
@@ -185,7 +202,7 @@ onMounted(() => {
       <!-- Bottom-Right: Correlation Heatmap -->
       <el-col :span="12">
         <el-card shadow="hover" class="chart-card" header="多特征相关性矩阵">
-          <HeatmapChart 
+          <HeatmapChart
             :data="heatmapData"
             :x-labels="heatmapLabels"
             :y-labels="heatmapLabels"
