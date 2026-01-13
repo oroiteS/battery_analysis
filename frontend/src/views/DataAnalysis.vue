@@ -36,6 +36,7 @@ const selectedRulFeature = ref('feature_1')
 // --- Data ---
 
 // 1. Statistical Table Data
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const tableData = ref<any[]>([])
 
 // 2. Line Chart Data (Trend)
@@ -60,20 +61,22 @@ const initData = async () => {
   try {
     // 1. Get Datasets (MVP: Built-in only)
     const datasets = await getDatasets()
-    if (datasets.length > 0) {
+    if (datasets[0] && datasets.length > 0) {
       const datasetId = datasets[0].id // Default to first dataset
 
       // 2. Get Batteries
       const batteries = await getBatteries(datasetId)
-      batteryOptions.value = batteries.map((b: BatteryUnit) => ({
-        value: b.id,
-        label: `${b.battery_code} (Cycles: ${b.total_cycles})`
-      }))
+      if (batteries) {
+        batteryOptions.value = batteries.map((b: BatteryUnit) => ({
+          value: b.id,
+          label: `${b.battery_code} (Cycles: ${b.total_cycles})`
+        }))
 
-      if (batteryOptions.value.length > 0) {
-        batteryId.value = batteryOptions.value[0].value
-        // 3. Load Analysis Data
-        await handleSearch()
+        if (batteryOptions.value[0] && batteryOptions.value.length > 0) {
+          batteryId.value = batteryOptions.value[0].value
+          // 3. Load Analysis Data
+          await handleSearch()
+        }
       }
     }
   } catch (error) {
@@ -90,15 +93,17 @@ const handleSearch = async () => {
 
     // 1. Stats
     const stats = await getBatteryStats(id)
-    tableData.value = stats.map(s => ({
-      name: s.feature_name,
-      mean: s.mean.toFixed(4),
-      variance: s.variance.toFixed(4),
-      min: s.min_val.toFixed(4),
-      max: s.max_val.toFixed(4),
-      r2_rul: s.corr_rul?.toFixed(4) || 'N/A',
-      r2_pcl: s.corr_pcl?.toFixed(4) || 'N/A'
-    }))
+    if (stats) {
+      tableData.value = stats.map(s => ({
+        name: s.feature_name,
+        mean: s.mean.toFixed(4),
+        variance: s.variance.toFixed(4),
+        min: s.min_val.toFixed(4),
+        max: s.max_val.toFixed(4),
+        r2_rul: s.corr_rul?.toFixed(4) || 'N/A',
+        r2_pcl: s.corr_pcl?.toFixed(4) || 'N/A'
+      }))
+    }
 
     // 2. Trend
     await updateTrendChart()
@@ -109,44 +114,48 @@ const handleSearch = async () => {
     // 4. PCL Distribution
     const pclDist = await getPCLDistribution(id)
     // Simple binning for histogram
-    const values = pclDist.pcl_values
-    if (values.length > 0) {
-      const min = Math.min(...values)
-      const max = Math.max(...values)
-      const binCount = 10
-      const step = (max - min) / binCount
+    if (pclDist && pclDist.pcl_values) {
+      const values = pclDist.pcl_values
+      if (values.length > 0) {
+        const min = Math.min(...values)
+        const max = Math.max(...values)
+        const binCount = 10
+        const step = (max - min) / binCount
 
-      const bins = new Array(binCount).fill(0)
-      const categories: string[] = []
+        const bins = new Array(binCount).fill(0)
+        const categories: string[] = []
 
-      for (let i = 0; i < binCount; i++) {
-        const start = min + i * step
-        const end = min + (i + 1) * step
-        categories.push(`${start.toFixed(2)}-${end.toFixed(2)}`)
+        for (let i = 0; i < binCount; i++) {
+          const start = min + i * step
+          const end = min + (i + 1) * step
+          categories.push(`${start.toFixed(2)}-${end.toFixed(2)}`)
+        }
+
+        values.forEach(v => {
+          const index = Math.min(Math.floor((v - min) / step), binCount - 1)
+          bins[index]++
+        })
+
+        histData.value = bins
+        histCategories.value = categories
+      } else {
+        histData.value = []
+        histCategories.value = []
       }
-
-      values.forEach(v => {
-        const index = Math.min(Math.floor((v - min) / step), binCount - 1)
-        bins[index]++
-      })
-
-      histData.value = bins
-      histCategories.value = categories
-    } else {
-      histData.value = []
-      histCategories.value = []
     }
 
     // 5. Correlation Matrix
     const matrix = await getCorrelationMatrix(id)
-    heatmapLabels.value = matrix.features
-    const heatData: number[][] = []
-    matrix.matrix.forEach((row, i) => {
-      row.forEach((val, j) => {
-        heatData.push([i, j, parseFloat(val.toFixed(2))])
+    if (matrix && matrix.features && matrix.matrix) {
+      heatmapLabels.value = matrix.features
+      const heatData: number[][] = []
+      matrix.matrix.forEach((row, i) => {
+        row.forEach((val, j) => {
+          heatData.push([i, j, parseFloat(val.toFixed(2))])
+        })
       })
-    })
-    heatmapData.value = heatData
+      heatmapData.value = heatData
+    }
 
   } catch (error) {
     console.error('Analysis failed:', error)
@@ -160,8 +169,10 @@ const updateTrendChart = async () => {
   if (!batteryId.value) return
   try {
     const trend = await getTrendData(batteryId.value, selectedFeature.value)
-    lineChartXAxis.value = trend.cycles.map(String)
-    lineChartData.value = trend.values
+    if (trend && trend.cycles && trend.values) {
+      lineChartXAxis.value = trend.cycles.map(String)
+      lineChartData.value = trend.values
+    }
   } catch (error) {
     console.error(error)
   }
@@ -171,7 +182,9 @@ const updateScatterChart = async () => {
   if (!batteryId.value) return
   try {
     const scatter = await getScatterData(batteryId.value, selectedRulFeature.value)
-    scatterChartData.value = scatter.points
+    if (scatter && scatter.points) {
+      scatterChartData.value = scatter.points
+    }
   } catch (error) {
     console.error(error)
   }
