@@ -263,7 +263,7 @@ paths:
   # ==========================================
   # Analysis
   # ==========================================
-  /analysis/{battery_id}/stats:
+  /data/batteries/{battery_id}/stats:
     get:
       tags: [Analysis]
       summary: 获取特征统计 (8x6表格)
@@ -302,7 +302,7 @@ paths:
                       type: number
                       nullable: true
 
-  /analysis/{battery_id}/trend:
+  /data/batteries/{battery_id}/trend:
     get:
       tags: [Analysis]
       summary: 获取趋势图数据
@@ -337,7 +337,7 @@ paths:
                     items:
                       type: number
 
-  /analysis/{battery_id}/scatter:
+  /data/batteries/{battery_id}/scatter:
     get:
       tags: [Analysis]
       summary: 获取散点图数据 (RUL vs Feature)
@@ -371,7 +371,7 @@ paths:
                         type: number
                     description: "[[x, y], [x, y]]"
 
-  /analysis/{battery_id}/pcl-distribution:
+  /data/batteries/{battery_id}/pcl-distribution:
     get:
       tags: [Analysis]
       summary: 获取PCL分布数据
@@ -396,7 +396,7 @@ paths:
                     items:
                       type: number
 
-  /analysis/{battery_id}/correlation-matrix:
+  /data/batteries/{battery_id}/correlation-matrix:
     get:
       tags: [Analysis]
       summary: 获取相关性矩阵 (热力图)
