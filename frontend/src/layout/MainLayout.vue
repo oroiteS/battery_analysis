@@ -1,7 +1,35 @@
 <script setup lang="ts">
-import { useRoute } from 'vue-router'
+import { ref, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
+const router = useRouter()
+const username = ref('Admin')
+
+onMounted(() => {
+  // Try to get username from localStorage or decode from token
+  // For now, we'll just use a stored username if available, or default to Admin
+  const storedUser = localStorage.getItem('username')
+  if (storedUser) {
+    username.value = storedUser
+  }
+})
+
+const handleLogout = () => {
+  ElMessageBox.confirm('确定要退出登录吗？', '提示', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    type: 'warning'
+  }).then(() => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('username')
+    ElMessage.success('已退出登录')
+    router.push('/login')
+  }).catch(() => {
+    // cancel
+  })
+}
 </script>
 
 <template>
@@ -37,7 +65,7 @@ const route = useRoute()
         </el-menu-item>
       </el-menu>
     </el-aside>
-    
+
     <el-container>
       <el-header>
         <div class="header-content">
@@ -47,13 +75,22 @@ const route = useRoute()
               <el-breadcrumb-item v-if="route.path !== '/'">{{ route.meta.title }}</el-breadcrumb-item>
             </el-breadcrumb>
           </div>
-          <div class="user-info">
-            <el-avatar :size="32" icon="UserFilled" />
-            <span class="username">Admin</span>
-          </div>
+          <el-dropdown trigger="click" @command="(command: string | number | object) => { if(command === 'logout') handleLogout() }">
+            <div class="user-info">
+              <el-avatar :size="32" icon="UserFilled" />
+              <span class="username">{{ username }}</span>
+              <el-icon class="el-icon--right"><arrow-down /></el-icon>
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="profile">个人中心</el-dropdown-item>
+                <el-dropdown-item divided command="logout">退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </el-header>
-      
+
       <el-main>
         <router-view v-slot="{ Component }">
           <transition name="fade" mode="out-in">

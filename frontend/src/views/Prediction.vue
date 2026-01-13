@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import * as echarts from 'echarts'
+
+defineOptions({
+  name: 'PredictionView'
+})
 
 const predictForm = ref({
   batteryId: '',
@@ -72,7 +75,7 @@ const handlePredict = () => {
             <el-radio label="RUL+PCL">RUL+PCL</el-radio>
           </el-radio-group>
         </el-form-item> -->
-        
+
         <el-form-item>
           <el-button type="primary" icon="VideoPlay" :loading="isPredicting" @click="handlePredict">
             开始预测
@@ -80,7 +83,7 @@ const handlePredict = () => {
         </el-form-item>
       </el-form>
     </el-card>
-    
+
     <div v-if="hasResult" class="result-area mt-20">
       <el-row :gutter="20">
         <el-col :span="12">
@@ -98,14 +101,14 @@ const handlePredict = () => {
           </el-card>
         </el-col>
       </el-row>
-      
+
       <el-row class="mt-20">
         <el-col :span="24" style="text-align: right;">
           <el-button type="success" icon="Download">导出预测报告 (CSV)</el-button>
         </el-col>
       </el-row>
     </div>
-    
+
     <el-empty v-else description="请选择电池和模型进行预测" class="mt-20" />
   </div>
 </template>
