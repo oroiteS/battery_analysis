@@ -73,7 +73,7 @@ const initData = async () => {
           label: `${b.battery_code} (Cycles: ${b.total_cycles})`,
         }))
 
-        if (batteryOptions.value[0] && batteryOptions.value.length > 0) {
+        if (batteryOptions.value.length > 0 && batteryOptions.value[0]) {
           batteryId.value = batteryOptions.value[0].value
           // 3. Load Analysis Data
           await handleSearch()
