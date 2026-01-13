@@ -1,7 +1,8 @@
 from typing import cast
-
+import io
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 # 定义 Pydantic 响应模型 (与 OpenAPI 对应)
 from pydantic import BaseModel
@@ -234,3 +235,62 @@ def get_correlation_matrix(
     matrix_data = corr_matrix.values.tolist()
 
     return CorrelationMatrix(features=feature_cols, matrix=matrix_data)
+
+
+# 6. 导出分析报告
+@router.get("/{battery_id}/export-report")
+def export_analysis_report(
+    battery_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    导出电池分析报告 (Excel)
+    包含:
+    - Sheet1: 原始数据 (Raw Data)
+    - Sheet2: 特征统计 (Statistics)
+    - Sheet3: 相关性矩阵 (Correlation)
+    """
+    df = get_battery_df(db, battery_id)
+    
+    # 1. 准备统计数据
+    stats_data = []
+    feature_cols = [f"feature_{i}" for i in range(1, 9)]
+    rul_series = _get_series(df, "rul") if "rul" in df.columns else None
+    pcl_series = _get_series(df, "pcl") if "pcl" in df.columns else None
+
+    for col in feature_cols:
+        feature_series = _get_series(df, col)
+        corr_rul = _safe_corr(feature_series, rul_series)
+        corr_pcl = _safe_corr(feature_series, pcl_series)
+        
+        stats_data.append({
+            "Feature": col,
+            "Mean": float(feature_series.mean()),
+            "Variance": float(feature_series.var()),
+            "Min": float(feature_series.min()),
+            "Max": float(feature_series.max()),
+            "Corr with RUL": corr_rul,
+            "Corr with PCL": corr_pcl
+        })
+    df_stats = pd.DataFrame(stats_data)
+
+    # 2. 准备相关性矩阵
+    feature_df: pd.DataFrame = df.loc[:, feature_cols]
+    df_corr = feature_df.corr().fillna(0)
+
+    # 3. 写入 Excel
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='Raw Data', index=False)
+        df_stats.to_excel(writer, sheet_name='Statistics', index=False)
+        df_corr.to_excel(writer, sheet_name='Correlation', index=True)
+    
+    output.seek(0)
+    
+    filename = f"battery_{battery_id}_analysis_report.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
