@@ -1,6 +1,8 @@
 # src/config.py
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # 1. 路径定位
@@ -11,6 +13,14 @@ env_path = base_dir / ".env"
 
 # 2. 加载 .env
 load_dotenv(dotenv_path=env_path)
+
+# 3. 时区配置 - 上海时区 (UTC+8)
+SHANGHAI_TZ = timezone(timedelta(hours=8))
+
+
+def get_local_now() -> datetime:
+    """获取当前本地时间（上海时区 UTC+8）"""
+    return datetime.now(SHANGHAI_TZ)
 
 
 class Settings:

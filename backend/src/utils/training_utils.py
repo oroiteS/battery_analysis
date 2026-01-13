@@ -460,6 +460,7 @@ def train(
     log_sigma_u,
     log_sigma_f,
     log_sigma_f_t,
+    on_epoch_end=None,  # 新增：epoch结束回调
 ):
     """
     神经网络模型的训练函数。
@@ -489,6 +490,9 @@ def train(
     results_epoch = dict()
     results_epoch["loss_train"] = torch.zeros(num_epoch)
     results_epoch["loss_val"] = torch.zeros(num_epoch)
+    results_epoch["loss_U"] = torch.zeros(num_epoch)
+    results_epoch["loss_F"] = torch.zeros(num_epoch)
+    results_epoch["loss_F_t"] = torch.zeros(num_epoch)
     results_epoch["p_r"] = torch.zeros(num_epoch)
     results_epoch["p_K"] = torch.zeros(num_epoch)
     results_epoch["p_C"] = torch.zeros(num_epoch)
@@ -500,6 +504,9 @@ def train(
         model.train()
         results_period = dict()
         results_period["loss_train"] = torch.zeros(num_period)
+        results_period["loss_U"] = torch.zeros(num_period)
+        results_period["loss_F"] = torch.zeros(num_period)
+        results_period["loss_F_t"] = torch.zeros(num_period)
         results_period["p_r"] = torch.zeros(num_period)
         results_period["p_K"] = torch.zeros(num_period)
         results_period["p_C"] = torch.zeros(num_period)
@@ -528,6 +535,9 @@ def train(
                 optimizer.step()
 
                 results_period["loss_train"][period] = criterion.loss_U.detach()
+                results_period["loss_U"][period] = criterion.loss_U.detach()
+                results_period["loss_F"][period] = criterion.loss_F.detach()
+                results_period["loss_F_t"][period] = criterion.loss_F_t.detach()
                 try:
                     results_period["p_r"][period] = model.p_r.detach()
                     results_period["p_K"][period] = model.p_K.detach()
@@ -541,6 +551,9 @@ def train(
                 # 详细的训练日志已通过回调函数记录，无需在此打印
 
         results_epoch["loss_train"][epoch] = torch.mean(results_period["loss_train"])
+        results_epoch["loss_U"][epoch] = torch.mean(results_period["loss_U"])
+        results_epoch["loss_F"][epoch] = torch.mean(results_period["loss_F"])
+        results_epoch["loss_F_t"][epoch] = torch.mean(results_period["loss_F_t"])
         results_epoch["p_r"][epoch] = torch.mean(results_period["p_r"])
         results_epoch["p_K"][epoch] = torch.mean(results_period["p_K"])
         results_epoch["p_C"][epoch] = torch.mean(results_period["p_C"])
@@ -561,5 +574,16 @@ def train(
         )
         scheduler.step()
         results_epoch["loss_val"][epoch] = criterion.loss_U.detach()
+
+        # 调用epoch结束回调（实时输出）
+        if on_epoch_end is not None:
+            on_epoch_end(
+                epoch=epoch,
+                train_loss=float(results_epoch["loss_train"][epoch]),
+                val_loss=float(results_epoch["loss_val"][epoch]),
+                loss_U=float(results_epoch["loss_U"][epoch]),
+                loss_F=float(results_epoch["loss_F"][epoch]),
+                loss_F_t=float(results_epoch["loss_F_t"][epoch]),
+            )
 
     return model, results_epoch

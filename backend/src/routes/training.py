@@ -9,7 +9,7 @@
 # --- WebSocket for Real-time Progress ---
 import asyncio
 import queue
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Annotated, Any, Dict, Optional
 
 from fastapi import (
@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
+from src.config import get_local_now
 from src.models import (
     BatteryUnit,
     TrainingJob,
@@ -221,7 +222,7 @@ async def create_training_job(
         hyperparams=hyperparams,
         status="PENDING",
         progress=0.0,
-        created_at=datetime.now(timezone.utc),
+        created_at=get_local_now(),
     )
     db.add(training_job)
     db.flush()
@@ -240,12 +241,18 @@ async def create_training_job(
 
     # 6. 为每个算法创建运行记录
     for algorithm in request.algorithms:
+        # BASELINE算法需要考虑num_rounds
+        total_epochs = request.num_epoch
+        if algorithm == "BASELINE":
+            num_rounds = request.num_rounds if request.num_rounds else 5
+            total_epochs = request.num_epoch * num_rounds
+
         training_run = TrainingJobRun(
             job_id=job_id,
             algorithm=algorithm,
             status="PENDING",
             current_epoch=0,
-            total_epochs=request.num_epoch,
+            total_epochs=total_epochs,
         )
         db.add(training_run)
 
@@ -271,10 +278,14 @@ async def get_training_job(
     - 所有算法运行状态
     - 关联的电池列表
     """
-    # 查询训练任务
+    # 查询训练任务（过滤已删除的）
     job = (
         db.query(TrainingJob)
-        .filter(TrainingJob.id == job_id, TrainingJob.user_id == current_user.id)
+        .filter(
+            TrainingJob.id == job_id,
+            TrainingJob.user_id == current_user.id,
+            TrainingJob.deleted_at.is_(None),  # 过滤已删除的任务
+        )
         .first()
     )
 
@@ -324,8 +335,12 @@ async def list_training_jobs(
 
     - 支持按状态筛选
     - 分页查询
+    - 自动过滤已删除的任务
     """
-    query = db.query(TrainingJob).filter(TrainingJob.user_id == current_user.id)
+    query = db.query(TrainingJob).filter(
+        TrainingJob.user_id == current_user.id,
+        TrainingJob.deleted_at.is_(None),  # 过滤已删除的任务
+    )
 
     if status_filter:
         query = query.filter(TrainingJob.status == status_filter)
@@ -349,10 +364,14 @@ async def get_training_metrics(
 
     返回指定运行的所有epoch指标
     """
-    # 验证任务所有权
+    # 验证任务所有权（过滤已删除的）
     job = (
         db.query(TrainingJob)
-        .filter(TrainingJob.id == job_id, TrainingJob.user_id == current_user.id)
+        .filter(
+            TrainingJob.id == job_id,
+            TrainingJob.user_id == current_user.id,
+            TrainingJob.deleted_at.is_(None),  # 过滤已删除的任务
+        )
         .first()
     )
 
@@ -410,14 +429,17 @@ async def get_training_logs(
 
     支持按日志级别筛选，返回最新的 limit 条日志
     """
-    from pathlib import Path
 
     from src.config import settings
 
-    # 验证任务所有权
+    # 验证任务所有权（过滤已删除的）
     job = (
         db.query(TrainingJob)
-        .filter(TrainingJob.id == job_id, TrainingJob.user_id == current_user.id)
+        .filter(
+            TrainingJob.id == job_id,
+            TrainingJob.user_id == current_user.id,
+            TrainingJob.deleted_at.is_(None),  # 过滤已删除的任务
+        )
         .first()
     )
 
@@ -452,7 +474,7 @@ async def get_training_logs(
 
     try:
         # 读取日志文件的最后 limit 行
-        with open(log_file_path, "r", encoding="utf-8") as f:
+        with open(str(log_file_path), "r", encoding="utf-8") as f:
             lines = f.readlines()
 
         # 解析日志行（格式：2026-01-13 00:45:23 - [INFO] - message）
@@ -536,7 +558,7 @@ async def delete_training_job(
     db.execute(
         update(TrainingJob)
         .where(TrainingJob.id == job_id)
-        .values(deleted_at=datetime.now(timezone.utc))
+        .values(deleted_at=get_local_now())
     )
     db.commit()
 

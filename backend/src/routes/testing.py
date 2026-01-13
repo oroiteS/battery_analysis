@@ -7,8 +7,8 @@
 
 import asyncio
 import queue
-from datetime import datetime, timezone
-from typing import Annotated, Any, Dict, Optional
+from datetime import datetime
+from typing import Annotated, Any, Dict, Optional, cast
 
 from fastapi import (
     APIRouter,
@@ -22,6 +22,7 @@ from fastapi import (
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from src.config import get_local_now
 from src.models import (
     BatteryUnit,
     ModelVersion,
@@ -217,7 +218,7 @@ async def create_test_job(
         target=request.target,
         horizon=request.horizon,
         status="PENDING",
-        created_at=datetime.now(timezone.utc),
+        created_at=get_local_now(),
     )
     db.add(test_job)
     db.flush()
@@ -442,7 +443,6 @@ async def get_test_logs(
 
     支持按日志级别筛选，返回最新的 limit 条日志
     """
-    from pathlib import Path
 
     from src.config import settings
     from src.models import TestJobLog
@@ -483,7 +483,7 @@ async def get_test_logs(
 
     try:
         # 读取日志文件的最后 limit 行
-        with open(log_file_path, "r", encoding="utf-8") as f:
+        with open(str(log_file_path), "r", encoding="utf-8") as f:
             lines = f.readlines()
 
         # 解析日志行（格式：2026-01-13 00:45:23 - [INFO] - message）
@@ -546,9 +546,12 @@ async def export_test_results(
     """
     导出测试结果
 
-    支持CSV和XLSX格式
+    支持CSV和XLSX格式，直接返回文件
     """
-    from src.models import TestExport
+    import csv
+    import io
+
+    from src.models import BatteryUnit, TestJobMetricOverall, TestJobPrediction
 
     # 验证任务所有权
     job = (
@@ -567,26 +570,211 @@ async def export_test_results(
             status_code=status.HTTP_400_BAD_REQUEST, detail="只能导出已完成的测试任务"
         )
 
-    # 创建导出记录
-    export_record = TestExport(
-        test_job_id=job_id,
-        user_id=current_user.id,
-        format=format,
-        file_path="",  # 将由worker填充
-        created_at=datetime.now(timezone.utc),
+    # 获取预测结果
+    predictions = (
+        db.query(TestJobPrediction)
+        .filter(TestJobPrediction.test_job_id == job_id)
+        .order_by(TestJobPrediction.battery_id, TestJobPrediction.cycle_num)
+        .all()
     )
-    db.add(export_record)
-    db.commit()
-    db.refresh(export_record)
 
-    # TODO: 启动后台导出任务
-    # start_export_job(export_id=export_record.id)
+    # 获取整体指标
+    overall_metrics = (
+        db.query(TestJobMetricOverall)
+        .filter(TestJobMetricOverall.test_job_id == job_id)
+        .all()
+    )
 
-    return {
-        "export_id": export_record.id,
-        "status": "PENDING",
-        "message": "导出任务已创建",
-    }
+    def _format_float(value: Optional[float]) -> str:
+        if value is None:
+            return ""
+        return f"{value:.6f}"
+
+    def _calculate_error(
+        y_true: Optional[float], y_pred: Optional[float]
+    ) -> Optional[float]:
+        if y_true is None or y_pred is None:
+            return None
+        return abs(y_true - y_pred)
+
+    if format == "CSV":
+        # 创建CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        # 写入元数据
+        writer.writerow(["测试任务导出报告"])
+        writer.writerow(["任务ID", job_id])
+        writer.writerow(["目标", job.target])
+        writer.writerow(["状态", job.status])
+        writer.writerow(["创建时间", job.created_at.strftime("%Y-%m-%d %H:%M:%S")])
+        writer.writerow([])
+
+        # 写入整体指标
+        writer.writerow(["整体指标"])
+        for metric in overall_metrics:
+            writer.writerow(["目标", metric.target])
+            for key, value in metric.metrics.items():
+                writer.writerow([key, value])
+        writer.writerow([])
+
+        # 写入预测结果表头
+        writer.writerow(["预测结果"])
+        writer.writerow(
+            ["电池ID", "电池编号", "周期", "目标", "真实值", "预测值", "误差"]
+        )
+
+        # 写入预测结果
+        for pred in predictions:
+            battery = (
+                db.query(BatteryUnit).filter(BatteryUnit.id == pred.battery_id).first()
+            )
+            pred_battery_id = cast(int, pred.battery_id)
+            battery_code = (
+                cast(str, battery.battery_code)
+                if battery
+                else f"Battery_{pred_battery_id}"
+            )
+            y_true = cast(Optional[float], pred.y_true)
+            y_pred = cast(Optional[float], pred.y_pred)
+            error = _calculate_error(y_true, y_pred)
+            writer.writerow(
+                [
+                    pred_battery_id,
+                    battery_code,
+                    pred.cycle_num,
+                    pred.target,
+                    _format_float(y_true),
+                    _format_float(y_pred),
+                    _format_float(error),
+                ]
+            )
+
+        # 准备响应
+        output.seek(0)
+        from fastapi.responses import StreamingResponse
+
+        filename = f"test_job_{job_id}_results.csv"
+        return StreamingResponse(
+            io.BytesIO(
+                output.getvalue().encode("utf-8-sig")
+            ),  # 使用UTF-8 BOM for Excel
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+
+    else:  # XLSX
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill
+            from openpyxl.utils import get_column_letter
+            from openpyxl.worksheet.worksheet import Worksheet
+        except ImportError:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="XLSX导出需要安装openpyxl库",
+            )
+
+        # 创建工作簿
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        if ws is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="无法创建Excel工作表",
+            )
+        ws = cast(Worksheet, ws)
+        ws.title = "测试结果"
+
+        # 标题样式
+        title_font = Font(bold=True, size=14)
+        header_font = Font(bold=True)
+        header_fill = PatternFill(
+            start_color="CCE5FF", end_color="CCE5FF", fill_type="solid"
+        )
+
+        row = 1
+
+        # 写入元数据
+        ws.cell(row, 1, "测试任务导出报告").font = title_font
+        row += 1
+        ws.cell(row, 1, "任务ID").font = header_font
+        ws.cell(row, 2, job_id)
+        row += 1
+        ws.cell(row, 1, "目标").font = header_font
+        ws.cell(row, 2, cast(str, job.target))
+        row += 1
+        ws.cell(row, 1, "状态").font = header_font
+        ws.cell(row, 2, cast(str, job.status))
+        row += 1
+        ws.cell(row, 1, "创建时间").font = header_font
+        ws.cell(row, 2, job.created_at.strftime("%Y-%m-%d %H:%M:%S"))
+        row += 2
+
+        # 写入整体指标
+        ws.cell(row, 1, "整体指标").font = title_font
+        row += 1
+        for metric in overall_metrics:
+            ws.cell(row, 1, "目标").font = header_font
+            ws.cell(row, 2, cast(str, metric.target))
+            row += 1
+            for key, value in metric.metrics.items():
+                ws.cell(row, 1, key)
+                ws.cell(row, 2, value)
+                row += 1
+        row += 1
+
+        # 写入预测结果表头
+        ws.cell(row, 1, "预测结果").font = title_font
+        row += 1
+        headers = ["电池ID", "电池编号", "周期", "目标", "真实值", "预测值", "误差"]
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row, col, header)
+            cell.font = header_font
+            cell.fill = header_fill
+        row += 1
+
+        # 写入预测结果
+        for pred in predictions:
+            battery = (
+                db.query(BatteryUnit).filter(BatteryUnit.id == pred.battery_id).first()
+            )
+            pred_battery_id = cast(int, pred.battery_id)
+            battery_code = (
+                cast(str, battery.battery_code)
+                if battery
+                else f"Battery_{pred_battery_id}"
+            )
+            y_true = cast(Optional[float], pred.y_true)
+            y_pred = cast(Optional[float], pred.y_pred)
+            error = _calculate_error(y_true, y_pred)
+
+            ws.cell(row, 1, pred_battery_id)
+            ws.cell(row, 2, battery_code)
+            ws.cell(row, 3, cast(int, pred.cycle_num))
+            ws.cell(row, 4, cast(str, pred.target))
+            ws.cell(row, 5, y_true)
+            ws.cell(row, 6, y_pred)
+            ws.cell(row, 7, error)
+            row += 1
+
+        # 调整列宽
+        for col in range(1, 8):
+            ws.column_dimensions[get_column_letter(col)].width = 15
+
+        # 保存到内存
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        from fastapi.responses import StreamingResponse
+
+        filename = f"test_job_{job_id}_results.xlsx"
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
 
 
 @router.websocket("/ws/jobs/{job_id}")

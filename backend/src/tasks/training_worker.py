@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import threading
 import traceback
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, cast
 
@@ -18,7 +17,7 @@ import torch
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from src.config import settings
+from src.config import get_local_now, settings
 from src.models import (
     ModelVersion,
     SessionLocal,
@@ -103,11 +102,14 @@ class TrainingWorker:
         # 清除已有的handlers（避免重复）
         self._file_logger.handlers.clear()
 
-        # 文件handler
+        # 文件handler（禁用缓冲，实现实时写入）
         file_handler = logging.FileHandler(
             self._log_file_path, mode="a", encoding="utf-8"
         )
         file_handler.setLevel(logging.DEBUG)
+
+        # 设置为无缓冲模式，确保日志实时写入
+        file_handler.stream.reconfigure(line_buffering=True)  # type: ignore
 
         # 格式化器
         formatter = logging.Formatter(
@@ -126,7 +128,7 @@ class TrainingWorker:
             message = {
                 "type": message_type,
                 "data": data,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": get_local_now().isoformat(),
             }
             try:
                 self._ws_manager.push_message(self.job_id, message)
@@ -145,15 +147,16 @@ class TrainingWorker:
             # 如果文件logger未初始化，降级到终端打印
             print(f"[{level}] {message}")
 
-        # 2. WebSocket推送日志（仅推送关键日志）
-        if self.current_run and level in ["WARNING", "ERROR"]:
+        # 2. WebSocket推送日志（推送所有级别的日志）
+        if self.current_run is not None:
             self._push_ws_message(
                 "log",
                 {
                     "run_id": self.run_id,
                     "algorithm": str(self.current_run.algorithm),
                     "level": level,
-                    "message": message[:500],  # 限制WebSocket消息长度
+                    "message": message[:1000],  # 限制WebSocket消息长度
+                    "timestamp": get_local_now().isoformat(),
                 },
             )
 
@@ -185,7 +188,7 @@ class TrainingWorker:
             run_id=self.run_id,
             user_id=self.job.user_id,
             log_file_path=str(relative_path),
-            created_at=datetime.now(timezone.utc),
+            created_at=get_local_now(),
         )
 
         try:
@@ -224,7 +227,7 @@ class TrainingWorker:
             train_loss=_to_float(train_loss),
             val_loss=_to_float(val_loss),
             metrics=normalized_metrics,
-            created_at=datetime.now(timezone.utc),
+            created_at=get_local_now(),
         )
 
         try:
@@ -239,7 +242,7 @@ class TrainingWorker:
                 self._file_logger.warning(f"Epoch {epoch} 指标保存失败: {str(e)}")
 
         # WebSocket推送epoch进度
-        if self.current_run:
+        if self.current_run is not None:
             total_epochs_value = cast(int | None, self.current_run.total_epochs)
             epoch_data = {
                 "run_id": self.run_id,
@@ -254,6 +257,73 @@ class TrainingWorker:
             # 添加额外指标
             epoch_data.update({k: _to_float(v) for k, v in normalized_metrics.items()})
             self._push_ws_message("epoch_progress", epoch_data)
+
+            # 更新任务级别的进度
+            self._update_job_progress_by_epoch(epoch + 1)
+
+    def _update_job_progress_by_epoch(self, current_epoch: int) -> None:
+        """根据当前epoch更新任务进度"""
+        if self.db is None or self.job is None:
+            return
+
+        try:
+            # 获取所有runs
+            all_runs = cast(
+                list[TrainingJobRun],
+                self.db.query(TrainingJobRun)
+                .filter(TrainingJobRun.job_id == self.job_id)
+                .all(),
+            )
+
+            total_runs = len(all_runs)
+            if total_runs == 0:
+                return
+
+            # 计算当前运行算法的索引
+            current_run_idx = 0
+            for idx, r in enumerate(all_runs):
+                run_id_value = cast(int | None, r.id)
+                if run_id_value is not None and run_id_value == self.run_id:
+                    current_run_idx = idx
+                    break
+
+            # 计算当前算法的epoch进度
+            current_run = cast(TrainingJobRun | None, self.current_run)
+            if current_run is None:
+                return
+
+            total_epochs_value = cast(int | None, current_run.total_epochs)
+            if total_epochs_value is None or total_epochs_value <= 0:
+                return
+
+            epoch_progress = current_epoch / total_epochs_value
+            # 总进度 = (已完成算法数 + 当前算法进度) / 总算法数
+            total_progress = (current_run_idx + epoch_progress) / total_runs
+
+            # 更新数据库中的进度
+            self.db.execute(
+                update(TrainingJob)
+                .where(TrainingJob.id == self.job_id)
+                .values(progress=total_progress)
+            )
+            self.db.commit()
+
+            # 刷新job对象
+            self.db.refresh(self.job)
+
+            # 推送WebSocket消息
+            self._push_ws_message(
+                "job_progress",
+                {
+                    "job_id": self.job_id,
+                    "progress": total_progress,
+                    "status": "RUNNING",
+                },
+            )
+        except Exception as e:
+            # 进度更新失败不影响训练
+            if self._file_logger:
+                self._file_logger.debug(f"Progress update failed: {e}")
 
     def _update_run_status(
         self, status: str, current_epoch: Optional[int] = None
@@ -271,9 +341,9 @@ class TrainingWorker:
             values["current_epoch"] = current_epoch
 
         if status == "RUNNING" and self.current_run.started_at is None:
-            values["started_at"] = datetime.now(timezone.utc)
+            values["started_at"] = get_local_now()
         elif status in {"SUCCEEDED", "FAILED"}:
-            values["finished_at"] = datetime.now(timezone.utc)
+            values["finished_at"] = get_local_now()
 
         self.db.execute(
             update(TrainingJobRun)
@@ -309,9 +379,9 @@ class TrainingWorker:
             values["progress"] = progress
 
         if status == "RUNNING" and self.job.started_at is None:
-            values["started_at"] = datetime.now(timezone.utc)
+            values["started_at"] = get_local_now()
         elif status in {"SUCCEEDED", "FAILED"}:
-            values["finished_at"] = datetime.now(timezone.utc)
+            values["finished_at"] = get_local_now()
 
         self.db.execute(
             update(TrainingJob).where(TrainingJob.id == self.job_id).values(**values)
@@ -407,7 +477,7 @@ class TrainingWorker:
             config=config,
             metrics=metrics,
             checkpoint_path=str(checkpoint_path.relative_to(settings.BASE_DIR)),
-            created_at=datetime.now(timezone.utc),
+            created_at=get_local_now(),
         )
 
         self.db.add(model_version)
@@ -484,7 +554,7 @@ class TrainingWorker:
 
             total_runs = len(runs)
             for idx, run in enumerate(runs):
-                self.current_run = run
+                self.current_run = cast(TrainingJobRun, run)
                 self.run_id = int(run.id)  # type: ignore[arg-type]
 
                 self._log(
@@ -518,6 +588,25 @@ class TrainingWorker:
                     self._update_run_status("FAILED")
 
                 progress = (idx + 1) / total_runs
+
+                # 计算更细粒度的进度：考虑当前运行的epoch进度
+                if self.current_run is not None:
+                    current_epoch_value = cast(
+                        int | None, self.current_run.current_epoch
+                    )
+                    total_epochs_value = cast(int | None, self.current_run.total_epochs)
+                    current_epoch_int = int(current_epoch_value or 0)
+                    total_epochs_int = (
+                        int(total_epochs_value) if total_epochs_value else 0
+                    )
+                    current_epoch_progress = (
+                        current_epoch_int / total_epochs_int
+                        if total_epochs_int > 0
+                        else 0.0
+                    )
+                    # 已完成算法 + 当前算法进度
+                    progress = (idx + current_epoch_progress) / total_runs
+
                 self._update_job_status("RUNNING", progress=progress)
 
             db.refresh(self.job)
@@ -561,7 +650,7 @@ class TrainingWorker:
                         r"Epoch:\s*(\d+),\s*Period:\s*(\d+),\s*Loss:\s*([\d.]+),\s*Loss_U:\s*([\d.]+),\s*Loss_F:\s*([\d.]+),\s*Loss_F_t:\s*([\d.]+)",
                         message,
                     )
-                    if match and self.current_run:
+                    if match and self.current_run is not None:
                         epoch = int(match.group(1))
                         period = int(match.group(2))
                         loss = float(match.group(3))
@@ -627,7 +716,7 @@ class TrainingWorker:
                         r"Epoch:\s*(\d+),\s*Period:\s*(\d+),\s*Loss:\s*([\d.]+),\s*Loss_U:\s*([\d.]+),\s*Loss_F:\s*([\d.]+),\s*Loss_F_t:\s*([\d.]+)",
                         message,
                     )
-                    if match and self.current_run:
+                    if match and self.current_run is not None:
                         epoch = int(match.group(1))
                         period = int(match.group(2))
                         loss = float(match.group(3))
@@ -653,17 +742,56 @@ class TrainingWorker:
                     pass  # 解析失败时静默忽略
 
         def on_epoch_end(
-            epoch: int, train_loss: float, val_loss: float, metrics: dict[str, Any]
+            epoch: int,
+            train_loss: float,
+            val_loss: float,
+            metrics: dict[str, Any],
+            round_idx: int,
+            num_rounds: int,
         ) -> None:
             self._save_epoch_metric(epoch, train_loss, val_loss, metrics)
             self._update_run_status("RUNNING", current_epoch=epoch + 1)
 
-            if epoch % 50 == 0:
-                self._log(
-                    "INFO",
-                    f"Epoch {epoch + 1}/{config.num_epoch}: "
-                    f"train_loss={train_loss:.6f}, val_loss={val_loss:.6f}",
-                )
+            # 每个 epoch 都输出日志，并包含轮次信息
+            round_info = (
+                f"[Round {round_idx + 1}/{num_rounds}] " if num_rounds > 1 else ""
+            )
+
+            # 构建详细的日志信息
+            log_parts = [
+                f"{round_info}Epoch {epoch + 1}/{config.num_epoch}:",
+                f"train_loss={train_loss:.6f}",
+                f"val_loss={val_loss:.6f}",
+            ]
+
+            # 添加额外的指标信息
+            # 只添加Loss_U, Loss_F, Loss_F_t（这是原始输出的全部内容）
+            if "loss_U" in metrics:
+                log_parts.append(f"loss_U={metrics['loss_U']:.6f}")
+            if "loss_F" in metrics:
+                log_parts.append(f"loss_F={metrics['loss_F']:.6f}")
+            if "loss_F_t" in metrics:
+                log_parts.append(f"loss_F_t={metrics['loss_F_t']:.6f}")
+
+            self._log("INFO", ", ".join(log_parts))
+
+            # 推送到 WebSocket
+            ws_data = {
+                "run_id": self.run_id,
+                "algorithm": str(self.current_run.algorithm)
+                if self.current_run is not None
+                else "UNKNOWN",
+                "round": round_idx + 1,
+                "total_rounds": num_rounds,
+                "epoch": epoch + 1,
+                "total_epochs": config.num_epoch,
+                "train_loss": train_loss,
+                "val_loss": val_loss,
+            }
+            # 添加额外指标到 WebSocket 消息
+            ws_data.update(metrics)
+
+            self._push_ws_message("epoch_progress", ws_data)
 
         callbacks = TrainingCallbacks(on_log=on_log, on_epoch_end=on_epoch_end)
 
@@ -726,7 +854,7 @@ class TrainingWorker:
                         r"Epoch:\s*(\d+),\s*Period:\s*(\d+),\s*Loss:\s*([\d.]+),\s*Loss_U:\s*([\d.]+),\s*Loss_F:\s*([\d.]+),\s*Loss_F_t:\s*([\d.]+)",
                         message,
                     )
-                    if match and self.current_run:
+                    if match and self.current_run is not None:
                         self._push_ws_message(
                             "training_detail",
                             {
@@ -744,17 +872,56 @@ class TrainingWorker:
                     pass
 
         def on_epoch_end(
-            epoch: int, train_loss: float, val_loss: float, metrics: dict[str, Any]
+            epoch: int,
+            train_loss: float,
+            val_loss: float,
+            metrics: dict[str, Any],
+            round_idx: int,
+            num_rounds: int,
         ) -> None:
             self._save_epoch_metric(epoch, train_loss, val_loss, metrics)
             self._update_run_status("RUNNING", current_epoch=epoch + 1)
 
-            if epoch % 50 == 0:
-                self._log(
-                    "INFO",
-                    f"Epoch {epoch + 1}/{config.num_epoch}: "
-                    f"train_loss={train_loss:.6f}, val_loss={val_loss:.6f}",
-                )
+            # 每个 epoch 都输出日志，并包含轮次信息
+            round_info = (
+                f"[Round {round_idx + 1}/{num_rounds}] " if num_rounds > 1 else ""
+            )
+
+            # 构建详细的日志信息
+            log_parts = [
+                f"{round_info}Epoch {epoch + 1}/{config.num_epoch}:",
+                f"train_loss={train_loss:.6f}",
+                f"val_loss={val_loss:.6f}",
+            ]
+
+            # 添加额外的指标信息
+            # 只添加Loss_U, Loss_F, Loss_F_t（这是原始输出的全部内容）
+            if "loss_U" in metrics:
+                log_parts.append(f"loss_U={metrics['loss_U']:.6f}")
+            if "loss_F" in metrics:
+                log_parts.append(f"loss_F={metrics['loss_F']:.6f}")
+            if "loss_F_t" in metrics:
+                log_parts.append(f"loss_F_t={metrics['loss_F_t']:.6f}")
+
+            self._log("INFO", ", ".join(log_parts))
+
+            # 推送到 WebSocket
+            ws_data = {
+                "run_id": self.run_id,
+                "algorithm": str(self.current_run.algorithm)
+                if self.current_run is not None
+                else "UNKNOWN",
+                "round": round_idx + 1,
+                "total_rounds": num_rounds,
+                "epoch": epoch + 1,
+                "total_epochs": config.num_epoch,
+                "train_loss": train_loss,
+                "val_loss": val_loss,
+            }
+            # 添加额外指标到 WebSocket 消息
+            ws_data.update(metrics)
+
+            self._push_ws_message("epoch_progress", ws_data)
 
         from src.tasks.model.bilstm_trainer import TrainingCallbacks as BiLSTMCallbacks
 
@@ -840,7 +1007,7 @@ class TrainingWorker:
                         r"Epoch:\s*(\d+),\s*Period:\s*(\d+),\s*Loss:\s*([\d.]+),\s*Loss_U:\s*([\d.]+),\s*Loss_F:\s*([\d.]+),\s*Loss_F_t:\s*([\d.]+)",
                         message,
                     )
-                    if match and self.current_run:
+                    if match and self.current_run is not None:
                         self._push_ws_message(
                             "training_detail",
                             {
@@ -858,17 +1025,56 @@ class TrainingWorker:
                     pass
 
         def on_epoch_end(
-            epoch: int, train_loss: float, val_loss: float, metrics: dict[str, Any]
+            epoch: int,
+            train_loss: float,
+            val_loss: float,
+            metrics: dict[str, Any],
+            round_idx: int,
+            num_rounds: int,
         ) -> None:
             self._save_epoch_metric(epoch, train_loss, val_loss, metrics)
             self._update_run_status("RUNNING", current_epoch=epoch + 1)
 
-            if epoch % 50 == 0:
-                self._log(
-                    "INFO",
-                    f"Epoch {epoch + 1}/{config.num_epoch}: "
-                    f"train_loss={train_loss:.6f}, val_loss={val_loss:.6f}",
-                )
+            # 每个 epoch 都输出日志，并包含轮次信息
+            round_info = (
+                f"[Round {round_idx + 1}/{num_rounds}] " if num_rounds > 1 else ""
+            )
+
+            # 构建详细的日志信息
+            log_parts = [
+                f"{round_info}Epoch {epoch + 1}/{config.num_epoch}:",
+                f"train_loss={train_loss:.6f}",
+                f"val_loss={val_loss:.6f}",
+            ]
+
+            # 添加额外的指标信息
+            # 只添加Loss_U, Loss_F, Loss_F_t（这是原始输出的全部内容）
+            if "loss_U" in metrics:
+                log_parts.append(f"loss_U={metrics['loss_U']:.6f}")
+            if "loss_F" in metrics:
+                log_parts.append(f"loss_F={metrics['loss_F']:.6f}")
+            if "loss_F_t" in metrics:
+                log_parts.append(f"loss_F_t={metrics['loss_F_t']:.6f}")
+
+            self._log("INFO", ", ".join(log_parts))
+
+            # 推送到 WebSocket
+            ws_data = {
+                "run_id": self.run_id,
+                "algorithm": str(self.current_run.algorithm)
+                if self.current_run is not None
+                else "UNKNOWN",
+                "round": round_idx + 1,
+                "total_rounds": num_rounds,
+                "epoch": epoch + 1,
+                "total_epochs": config.num_epoch,
+                "train_loss": train_loss,
+                "val_loss": val_loss,
+            }
+            # 添加额外指标到 WebSocket 消息
+            ws_data.update(metrics)
+
+            self._push_ws_message("epoch_progress", ws_data)
 
         def on_hyperparameter_search(
             l_idx: int, n_idx: int, num_l: int, num_n: int, metrics: dict[str, float]

@@ -143,14 +143,28 @@ def main():
         def on_log(level: str, message: str):
             print(f"[{level}] {message}")
 
-        def on_epoch_end(epoch: int, train_loss: float, val_loss: float, metrics: dict):
+        def on_epoch_end(
+            epoch: int,
+            train_loss: float,
+            val_loss: float,
+            metrics: dict[str, float],
+            round_idx: int,
+            num_rounds: int,
+        ) -> None:
             if epoch % 50 == 0 or epoch == config.num_epoch - 1:
                 print(
                     f"  Epoch {epoch + 1}/{config.num_epoch}: "
                     f"train_loss={train_loss:.6f}, val_loss={val_loss:.6f}"
                 )
             epoch_logs.append(
-                {"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss}
+                {
+                    "epoch": epoch,
+                    "train_loss": train_loss,
+                    "val_loss": val_loss,
+                    "round_idx": round_idx,
+                    "num_rounds": num_rounds,
+                    **metrics,
+                }
             )
 
         def on_hyperparameter_search(
@@ -166,7 +180,7 @@ def main():
 
         callbacks = TrainingCallbacks(
             on_log=on_log,
-            on_epoch_end=on_epoch_end,
+            on_epoch_end=on_epoch_end,  # y
             on_hyperparameter_search=on_hyperparameter_search,
         )
 

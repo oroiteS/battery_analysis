@@ -122,7 +122,9 @@ class BiLSTMTrainingConfig:
 class TrainingCallbacks:
     """训练回调函数集合"""
 
-    on_epoch_end: Optional[Callable[[int, float, float, dict[str, float]], None]] = None
+    on_epoch_end: Optional[
+        Callable[[int, float, float, dict[str, float], int, int], None]
+    ] = None  # (epoch, train_loss, val_loss, metrics, round_idx, num_rounds)
     on_training_end: Optional[Callable[[dict[str, Any]], None]] = None
     on_log: Optional[Callable[[str, str], None]] = None
 
@@ -278,7 +280,7 @@ def train_bilstm_from_database(
         )
 
         if callbacks.on_epoch_end:
-            callbacks.on_epoch_end(epoch + 1, avg_train_loss, val_loss, {})
+            callbacks.on_epoch_end(epoch + 1, avg_train_loss, val_loss, {}, 0, 1)
 
         # 学习率调度
         if config.lr_scheduler == "ReduceLROnPlateau":

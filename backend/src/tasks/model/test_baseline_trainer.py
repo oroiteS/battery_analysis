@@ -71,7 +71,14 @@ def test_baseline_trainer():
         def on_log(level: str, message: str):
             print(f"[{level}] {message}")
 
-        def on_epoch_end(epoch: int, train_loss: float, val_loss: float, metrics: dict):
+        def on_epoch_end(
+            epoch: int,
+            train_loss: float,
+            val_loss: float,
+            metrics: dict[str, float],
+            round_idx: int,
+            num_rounds: int,
+        ) -> None:
             print(
                 f"  Epoch {epoch + 1}: train_loss={train_loss:.6f}, val_loss={val_loss:.6f}"
             )

@@ -1,6 +1,4 @@
 # src/models.py
-from datetime import datetime, timezone
-
 from sqlalchemy import (
     JSON,
     BigInteger,
@@ -19,7 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
-from src.config import settings
+from src.config import get_local_now, settings
 
 # --- 数据库连接 ---
 engine = create_engine(
@@ -60,9 +58,7 @@ class User(Base):
     user_name = Column(String(50), nullable=False, unique=True)
     email = Column(String(255), nullable=False, unique=True)
     password_hash = Column(String(255), nullable=False)
-    created_at = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime, nullable=False, default=lambda: get_local_now())
 
     uploads = relationship("DataUpload", back_populates="user")
     datasets = relationship("Dataset", back_populates="owner")
@@ -82,9 +78,7 @@ class DataUpload(Base):
     file_size = Column(BigInteger, nullable=False)
     status = Column(UploadStatusEnum, nullable=False, default="PENDING")
     error_message = Column(String(2000), nullable=True)
-    created_at = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime, nullable=False, default=lambda: get_local_now())
     processed_at = Column(DateTime, nullable=True)
     deleted_at = Column(DateTime, nullable=True)
 
@@ -114,9 +108,7 @@ class Dataset(Base):
     name = Column(String(120), nullable=False)
     upload_id = Column(BigInteger, ForeignKey("data_upload.id"), nullable=True)
     feature_schema = Column(JSON, nullable=True)
-    created_at = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime, nullable=False, default=lambda: get_local_now())
     deleted_at = Column(DateTime, nullable=True)
 
     owner = relationship("User", back_populates="datasets")
@@ -199,9 +191,7 @@ class TrainingJob(Base):
     hyperparams = Column(JSON, nullable=True)
     status = Column(JobStatusEnum, nullable=False, default="PENDING")
     progress = Column(Numeric(6, 5), nullable=False, default=0.0)
-    created_at = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime, nullable=False, default=lambda: get_local_now())
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     deleted_at = Column(DateTime, nullable=True)
@@ -268,9 +258,7 @@ class TrainingJobRunMetric(Base):
     train_loss = Column(Float, nullable=True)
     val_loss = Column(Float, nullable=True)
     metrics = Column(JSON, nullable=True)
-    created_at = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime, nullable=False, default=lambda: get_local_now())
 
     run = relationship("TrainingJobRun", back_populates="metrics")
 
@@ -287,9 +275,7 @@ class TrainingJobRunLog(Base):
     run_id = Column(BigInteger, ForeignKey("training_job_run.id"), nullable=False)
     user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False)
     log_file_path = Column(String(500), nullable=False)  # 日志文件路径
-    created_at = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime, nullable=False, default=lambda: get_local_now())
 
     run = relationship("TrainingJobRun", back_populates="logs")
 
@@ -314,9 +300,7 @@ class ModelVersion(Base):
     config = Column(JSON, nullable=True)
     metrics = Column(JSON, nullable=True)
     checkpoint_path = Column(String(500), nullable=False)
-    created_at = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime, nullable=False, default=lambda: get_local_now())
     deleted_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="model_versions")
@@ -342,9 +326,7 @@ class TestJob(Base):
     target = Column(TargetEnum, nullable=False)
     horizon = Column(Integer, nullable=False, default=1)
     status = Column(JobStatusEnum, nullable=False, default="PENDING")
-    created_at = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime, nullable=False, default=lambda: get_local_now())
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     deleted_at = Column(DateTime, nullable=True)
@@ -389,9 +371,7 @@ class TestJobMetricOverall(Base):
     test_job_id = Column(BigInteger, ForeignKey("test_job.id"), nullable=False)
     target = Column(Enum("RUL", "PCL", name="metric_target_enum"), nullable=False)
     metrics = Column(JSON, nullable=False)
-    created_at = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime, nullable=False, default=lambda: get_local_now())
 
     test_job = relationship("TestJob", back_populates="overall_metrics")
 
@@ -456,9 +436,7 @@ class TestJobLog(Base):
     test_job_id = Column(BigInteger, ForeignKey("test_job.id"), nullable=False)
     user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False)
     log_file_path = Column(String(500), nullable=False)  # 日志文件路径
-    created_at = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime, nullable=False, default=lambda: get_local_now())
 
     test_job = relationship("TestJob", back_populates="logs")
 
@@ -475,9 +453,7 @@ class TestExport(Base):
     format = Column(ExportFormatEnum, nullable=False)
     file_path = Column(String(500), nullable=False)
     file_size = Column(BigInteger, nullable=True)
-    created_at = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime, nullable=False, default=lambda: get_local_now())
 
     test_job = relationship("TestJob", back_populates="exports")
 

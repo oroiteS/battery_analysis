@@ -11,15 +11,16 @@ import {
   getScatterData,
   getPCLDistribution,
   getCorrelationMatrix,
-  exportAnalysisReport
+  exportAnalysisReport,
 } from '../api/analysis'
 import type { BatteryUnit } from '../api/types'
 import { ElMessage } from 'element-plus'
 
 defineOptions({
-  name: 'DataAnalysisView'
+  name: 'DataAnalysisView',
 })
 
+const datasetId = ref<number | null>(null)
 const batteryId = ref<number | null>(null)
 const batteryOptions = ref<{ value: number; label: string }[]>([])
 
@@ -27,7 +28,7 @@ const batteryOptions = ref<{ value: number; label: string }[]>([])
 const selectedFeature = ref('feature_1')
 const featureOptions = Array.from({ length: 8 }, (_, i) => ({
   value: `feature_${i + 1}`,
-  label: `Feature ${i + 1}`
+  label: `Feature ${i + 1}`,
 }))
 
 // Feature selection for Scatter Chart (RUL)
@@ -61,15 +62,15 @@ const initData = async () => {
   try {
     // 1. Get Datasets (MVP: Built-in only)
     const datasets = await getDatasets()
-    if (datasets && datasets[0] && datasets.length > 0) {
-      const datasetId = datasets[0].id // Default to first dataset
+    if (datasets[0] && datasets.length > 0) {
+      datasetId.value = datasets[0].id // Store dataset ID
 
       // 2. Get Batteries
-      const batteries = await getBatteries(datasetId)
+      const batteries = await getBatteries(datasetId.value)
       if (batteries) {
         batteryOptions.value = batteries.map((b: BatteryUnit) => ({
           value: b.id,
-          label: `${b.battery_code} (Cycles: ${b.total_cycles})`
+          label: `${b.battery_code} (Cycles: ${b.total_cycles})`,
         }))
 
         if (batteryOptions.value.length > 0 && batteryOptions.value[0]) {
@@ -94,14 +95,14 @@ const handleSearch = async () => {
     // 1. Stats
     const stats = await getBatteryStats(id)
     if (stats) {
-      tableData.value = stats.map(s => ({
+      tableData.value = stats.map((s) => ({
         name: s.feature_name,
         mean: s.mean.toFixed(4),
         variance: s.variance.toFixed(4),
         min: s.min_val.toFixed(4),
         max: s.max_val.toFixed(4),
         r2_rul: s.corr_rul?.toFixed(4) || 'N/A',
-        r2_pcl: s.corr_pcl?.toFixed(4) || 'N/A'
+        r2_pcl: s.corr_pcl?.toFixed(4) || 'N/A',
       }))
     }
 
@@ -131,7 +132,7 @@ const handleSearch = async () => {
           categories.push(`${start.toFixed(2)}-${end.toFixed(2)}`)
         }
 
-        values.forEach(v => {
+        values.forEach((v) => {
           const index = Math.min(Math.floor((v - min) / step), binCount - 1)
           bins[index]++
         })
@@ -156,7 +157,6 @@ const handleSearch = async () => {
       })
       heatmapData.value = heatData
     }
-
   } catch (error) {
     console.error('Analysis failed:', error)
     ElMessage.error('获取分析数据失败')
@@ -198,27 +198,19 @@ const handleRulFeatureChange = () => {
   updateScatterChart()
 }
 
-const handleExport = async () => {
-  if (!batteryId.value) {
+// 导出分析报告
+const handleExportReport = async () => {
+  if (!datasetId.value || !batteryId.value) {
     ElMessage.warning('请先选择电池组')
     return
   }
 
   try {
-    const response = await exportAnalysisReport(batteryId.value)
-    // Create blob link to download
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const url = window.URL.createObjectURL(new Blob([response as any]))
-    const link = document.createElement('a')
-    link.href = url
-    link.setAttribute('download', `battery_${batteryId.value}_analysis_report.xlsx`)
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    ElMessage.success('导出成功')
+    await exportAnalysisReport(datasetId.value, batteryId.value, 'XLSX')
+    ElMessage.success('分析报告导出成功')
   } catch (error) {
     console.error('Export failed:', error)
-    ElMessage.error('导出失败')
+    ElMessage.error('导出分析报告失败')
   }
 }
 
@@ -244,7 +236,13 @@ onMounted(() => {
       <div class="header-content">
         <div class="left-panel">
           <span class="label">电池组编号：</span>
-          <el-select v-model="batteryId" placeholder="请选择电池组" style="width: 240px" filterable @change="handleSearch">
+          <el-select
+            v-model="batteryId"
+            placeholder="请选择电池组"
+            style="width: 240px"
+            filterable
+            @change="handleSearch"
+          >
             <el-option
               v-for="item in batteryOptions"
               :key="item.value"
@@ -254,7 +252,9 @@ onMounted(() => {
           </el-select>
         </div>
         <div class="right-panel">
-          <el-button type="primary" icon="Download" @click="handleExport">导出分析报告</el-button>
+          <el-button type="primary" icon="Download" @click="handleExportReport">
+            导出分析报告
+          </el-button>
         </div>
       </div>
     </el-card>
@@ -275,7 +275,7 @@ onMounted(() => {
           </template>
         </el-table-column>
         <el-table-column label="与 PCL 相关性 (R²)">
-           <template #default="scope">
+          <template #default="scope">
             <span :style="getCorrelationStyle(scope.row.r2_pcl)">
               {{ scope.row.r2_pcl }}
             </span>
@@ -292,16 +292,22 @@ onMounted(() => {
           <template #header>
             <div class="card-header">
               <span>特征趋势分析(各特征随循环次数的变化)</span>
-              <el-select v-model="selectedFeature" size="small" style="width: 120px" @change="handleFeatureChange">
-                <el-option v-for="opt in featureOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+              <el-select
+                v-model="selectedFeature"
+                size="small"
+                style="width: 120px"
+                @change="handleFeatureChange"
+              >
+                <el-option
+                  v-for="opt in featureOptions"
+                  :key="opt.value"
+                  :label="opt.label"
+                  :value="opt.value"
+                />
               </el-select>
             </div>
           </template>
-          <LineChart
-            :data="lineChartData"
-            :x-axis-data="lineChartXAxis"
-            y-axis-name="Value"
-          />
+          <LineChart :data="lineChartData" :x-axis-data="lineChartXAxis" y-axis-name="Value" />
         </el-card>
       </el-col>
 
@@ -311,16 +317,26 @@ onMounted(() => {
           <template #header>
             <div class="card-header">
               <span>RUL 关键因子分析 (Top Feature vs RUL)</span>
-              <el-select v-model="selectedRulFeature" size="small" style="width: 120px" @change="handleRulFeatureChange">
-                <el-option v-for="opt in featureOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+              <el-select
+                v-model="selectedRulFeature"
+                size="small"
+                style="width: 120px"
+                @change="handleRulFeatureChange"
+              >
+                <el-option
+                  v-for="opt in featureOptions"
+                  :key="opt.value"
+                  :label="opt.label"
+                  :value="opt.value"
+                />
               </el-select>
             </div>
           </template>
-           <ScatterChart
+          <ScatterChart
             :data="scatterChartData"
             x-axis-name="Feature Value"
             y-axis-name="RUL (Cycles)"
-           />
+          />
         </el-card>
       </el-col>
     </el-row>
@@ -329,21 +345,14 @@ onMounted(() => {
       <!-- Bottom-Left: PCL Distribution -->
       <el-col :span="12">
         <el-card shadow="hover" class="chart-card" header="容量衰减分布 (PCL Distribution)">
-          <HistogramChart
-            :data="histData"
-            :categories="histCategories"
-          />
+          <HistogramChart :data="histData" :categories="histCategories" />
         </el-card>
       </el-col>
 
       <!-- Bottom-Right: Correlation Heatmap -->
       <el-col :span="12">
         <el-card shadow="hover" class="chart-card" header="多特征相关性矩阵">
-          <HeatmapChart
-            :data="heatmapData"
-            :x-labels="heatmapLabels"
-            :y-labels="heatmapLabels"
-          />
+          <HeatmapChart :data="heatmapData" :x-labels="heatmapLabels" :y-labels="heatmapLabels" />
         </el-card>
       </el-col>
     </el-row>
