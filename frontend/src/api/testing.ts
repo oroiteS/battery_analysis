@@ -6,7 +6,6 @@ import type {
   TestMetrics,
   TestPredictionsResponse,
   TestLogsResponse,
-  TestExportResponse,
 } from './types'
 
 /**
