@@ -1,7 +1,9 @@
-from typing import Annotated, cast
+import io
+from typing import Annotated, Any, cast
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 
 # 定义 Pydantic 响应模型 (与 OpenAPI 对应)
 from pydantic import BaseModel
@@ -55,8 +57,6 @@ async def export_analysis_report(
 
     支持PDF和XLSX格式
     """
-    import io
-
     # 验证数据集访问权限
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
@@ -126,8 +126,6 @@ async def export_analysis_report(
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)
-
-        from fastapi.responses import StreamingResponse
 
         filename = f"analysis_report_battery_{battery.battery_code}.xlsx"
         return StreamingResponse(
@@ -486,7 +484,7 @@ def get_correlation_matrix(
 
 # 6. 导出分析报告
 @router.get("/{battery_id}/export-report")
-def export_analysis_report(
+def export_battery_report(
     battery_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -499,7 +497,7 @@ def export_analysis_report(
     - Sheet3: 相关性矩阵 (Correlation)
     """
     df = get_battery_df(db, battery_id)
-    
+
     # 1. 准备统计数据
     stats_data = []
     feature_cols = [f"feature_{i}" for i in range(1, 9)]
@@ -510,16 +508,18 @@ def export_analysis_report(
         feature_series = _get_series(df, col)
         corr_rul = _safe_corr(feature_series, rul_series)
         corr_pcl = _safe_corr(feature_series, pcl_series)
-        
-        stats_data.append({
-            "Feature": col,
-            "Mean": float(feature_series.mean()),
-            "Variance": float(feature_series.var()),
-            "Min": float(feature_series.min()),
-            "Max": float(feature_series.max()),
-            "Corr with RUL": corr_rul,
-            "Corr with PCL": corr_pcl
-        })
+
+        stats_data.append(
+            {
+                "Feature": col,
+                "Mean": float(feature_series.mean()),
+                "Variance": float(feature_series.var()),
+                "Min": float(feature_series.min()),
+                "Max": float(feature_series.max()),
+                "Corr with RUL": corr_rul,
+                "Corr with PCL": corr_pcl,
+            }
+        )
     df_stats = pd.DataFrame(stats_data)
 
     # 2. 准备相关性矩阵
@@ -528,16 +528,16 @@ def export_analysis_report(
 
     # 3. 写入 Excel
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, sheet_name='Raw Data', index=False)
-        df_stats.to_excel(writer, sheet_name='Statistics', index=False)
-        df_corr.to_excel(writer, sheet_name='Correlation', index=True)
-    
+    with pd.ExcelWriter(cast(Any, output), engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Raw Data", index=False)
+        df_stats.to_excel(writer, sheet_name="Statistics", index=False)
+        df_corr.to_excel(writer, sheet_name="Correlation", index=True)
+
     output.seek(0)
-    
+
     filename = f"battery_{battery_id}_analysis_report.xlsx"
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )

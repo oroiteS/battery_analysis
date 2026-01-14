@@ -295,6 +295,7 @@ class ModelVersion(Base):
     user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False)
     run_id = Column(BigInteger, ForeignKey("training_job_run.id"), nullable=False)
     algorithm = Column(AlgorithmEnum, nullable=False)
+    target = Column(TargetEnum, nullable=False)  # 训练目标: RUL, PCL
     name = Column(String(120), nullable=False)
     version = Column(String(32), nullable=False)
     config = Column(JSON, nullable=True)

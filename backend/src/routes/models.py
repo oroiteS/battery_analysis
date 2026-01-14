@@ -29,6 +29,7 @@ class ModelVersionResponse(BaseModel):
     user_id: int
     run_id: int
     algorithm: str
+    target: str  # 训练目标: RUL, PCL
     name: str
     version: str
     config: dict
