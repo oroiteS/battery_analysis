@@ -494,7 +494,7 @@ const handleWebSocketMessage = (data: Record<string, unknown>) => {
     console.log('任务状态变更:', status)
     if (status === 'SUCCEEDED') {
       ElMessage.success('测试完成')
-      const jobId = payload.test_job_id ?? data.test_job_id ?? currentJobId.value
+      const jobId = (payload.test_job_id as number) ?? (data.test_job_id as number) ?? currentJobId.value
       void finalizeTest(jobId)
     } else if (status === 'FAILED') {
       isTesting.value = false

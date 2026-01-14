@@ -10,9 +10,9 @@ const router = useRouter()
 
 // 统计数据
 const stats = ref([
-  { title: '电池总数', value: 124, icon: 'DataLine', color: '#409EFF' },
-  { title: '训练任务', value: 0, icon: 'Cpu', color: '#67C23A' },
-  { title: '测试任务', value: 0, icon: 'TrendCharts', color: '#E6A23C' },
+  { title: '电池总数', value: 124, icon: 'DataLine', change: '+12%' },
+  { title: '训练任务', value: 0, icon: 'Cpu', change: '+5%' },
+  { title: '测试任务', value: 0, icon: 'TrendCharts', change: '0%' },
 ])
 
 // 最近训练任务
@@ -33,16 +33,16 @@ const loadDashboardData = async () => {
     // 加载训练任务总数和最近任务
     trainingLoading.value = true
     const allTrainingRes = await listTrainingJobs()
-    stats.value[1].value = allTrainingRes.length
+    if (stats.value[1]) stats.value[1].value = allTrainingRes.length
     recentTrainingJobs.value = allTrainingRes.slice(0, 5)
 
     // 加载测试任务总数和最近任务
     testLoading.value = true
     const allTestRes = await listTestJobs()
-    stats.value[2].value = allTestRes.length
+    if (stats.value[2]) stats.value[2].value = allTestRes.length
     recentTestJobs.value = allTestRes.slice(0, 5)
   } catch (error: any) {
-    console.error('加载工作台数据失败:', error)
+    console.error('Failed to load dashboard data:', error)
     ElMessage.error('加载数据失败')
   } finally {
     trainingLoading.value = false
@@ -52,7 +52,12 @@ const loadDashboardData = async () => {
 
 // 格式化日期
 const formatDate = (dateStr: string) => {
-  return new Date(dateStr).toLocaleString('zh-CN')
+  return new Date(dateStr).toLocaleDateString('zh-CN', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
 }
 
 // 跳转到训练平台
@@ -83,197 +88,238 @@ const viewTestDetail = (jobId: number) => {
 
 <template>
   <div class="workspace-container">
-    <!-- 统计卡片 -->
-    <el-row :gutter="20">
-      <el-col :span="8" v-for="item in stats" :key="item.title">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-content">
-            <div class="stat-icon" :style="{ backgroundColor: item.color }">
-              <el-icon><component :is="item.icon" /></el-icon>
-            </div>
-            <div class="stat-info">
-              <div class="stat-value">{{ item.value }}</div>
-              <div class="stat-title">{{ item.title }}</div>
-            </div>
+    <!-- Stat Cards -->
+    <div class="stats-grid">
+      <el-card v-for="item in stats" :key="item.title" class="stat-card" shadow="hover">
+        <div class="stat-header">
+          <span class="stat-title">{{ item.title }}</span>
+          <el-icon class="stat-icon"><component :is="item.icon" /></el-icon>
+        </div>
+        <div class="stat-body">
+          <div class="stat-value">{{ item.value }}</div>
+          <div class="stat-change" :class="{ 'positive': item.change.includes('+') }">
+            {{ item.change }} <span class="stat-period">较上月</span>
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
+        </div>
+      </el-card>
+    </div>
 
-    <!-- 最近训练任务 -->
-    <el-card shadow="hover" class="section-card" header="最近训练任务">
-      <template #extra>
-        <el-button type="primary" link @click="goToTraining">查看全部</el-button>
+    <!-- Quick Actions -->
+    <div class="section-header">
+      <h3>快捷操作</h3>
+    </div>
+    <div class="quick-actions-grid">
+      <div class="action-card" @click="goToTraining">
+        <div class="action-icon"><Cpu /></div>
+        <div class="action-text">新建训练任务</div>
+      </div>
+      <div class="action-card" @click="goToTesting">
+        <div class="action-icon"><TrendCharts /></div>
+        <div class="action-text">新建测试任务</div>
+      </div>
+      <div class="action-card" @click="goToDataAnalysis">
+        <div class="action-icon"><DataLine /></div>
+        <div class="action-text">数据分析</div>
+      </div>
+    </div>
+
+    <!-- Recent Training Jobs -->
+    <el-card class="table-card" shadow="never">
+      <template #header>
+        <div class="card-header">
+          <span>最近训练任务</span>
+          <el-button text @click="goToTraining">查看全部</el-button>
+        </div>
       </template>
       <el-table
         :data="recentTrainingJobs"
         v-loading="trainingLoading"
         empty-text="暂无训练任务"
         style="width: 100%"
+        :header-cell-style="{ background: 'transparent' }"
       >
-        <el-table-column prop="id" label="任务ID" width="80" />
-        <el-table-column prop="created_at" label="创建时间" width="180">
+        <el-table-column prop="id" label="ID" width="80">
+          <template #default="scope">
+            <span class="id-cell">#{{ scope.row.id }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="target" label="目标" width="120" />
+        <el-table-column prop="created_at" label="创建日期">
           <template #default="scope">
             {{ formatDate(scope.row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column prop="target" label="目标" width="100">
-          <template #default="scope">
-            <el-tag>{{ scope.row.target }}</el-tag>
-          </template>
-        </el-table-column>
         <el-table-column prop="status" label="状态" width="120">
           <template #default="scope">
-            <el-tag
-              :type="
-                scope.row.status === 'SUCCEEDED'
-                  ? 'success'
-                  : scope.row.status === 'RUNNING'
-                    ? 'primary'
-                    : scope.row.status === 'FAILED'
-                      ? 'danger'
-                      : 'info'
-              "
-            >
-              {{ scope.row.status }}
-            </el-tag>
+            <div class="status-dot" 
+              :class="{
+                'success': scope.row.status === 'SUCCEEDED',
+                'running': scope.row.status === 'RUNNING',
+                'failed': scope.row.status === 'FAILED'
+              }"
+            ></div>
+            {{ scope.row.status }}
           </template>
         </el-table-column>
-        <el-table-column prop="progress" label="进度" width="200">
+        <el-table-column label="" width="120" align="right">
           <template #default="scope">
-            <el-progress :percentage="Math.round(scope.row.progress * 100)" />
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="120">
-          <template #default="scope">
-            <el-button type="primary" link @click="viewTrainingDetail(scope.row.id)">
+            <el-button type="primary" size="small" @click="viewTrainingDetail(scope.row.id)">
               查看详情
             </el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
-
-    <!-- 最近测试任务 -->
-    <el-card shadow="hover" class="section-card" header="最近测试任务">
-      <template #extra>
-        <el-button type="primary" link @click="goToTesting">查看全部</el-button>
-      </template>
-      <el-table
-        :data="recentTestJobs"
-        v-loading="testLoading"
-        empty-text="暂无测试任务"
-        style="width: 100%"
-      >
-        <el-table-column prop="id" label="任务ID" width="80" />
-        <el-table-column prop="created_at" label="创建时间" width="180">
-          <template #default="scope">
-            {{ formatDate(scope.row.created_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="model_name" label="模型" width="200">
-          <template #default="scope">
-            <el-tag type="success">{{ scope.row.model_name || 'N/A' }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="120">
-          <template #default="scope">
-            <el-tag
-              :type="
-                scope.row.status === 'SUCCEEDED'
-                  ? 'success'
-                  : scope.row.status === 'RUNNING'
-                    ? 'primary'
-                    : scope.row.status === 'FAILED'
-                      ? 'danger'
-                      : 'info'
-              "
-            >
-              {{ scope.row.status }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="120">
-          <template #default="scope">
-            <el-button type="primary" link @click="viewTestDetail(scope.row.id)">
-              查看结果
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
-
-    <!-- 快速操作 -->
-    <el-card shadow="hover" class="section-card" header="快速操作">
-      <div class="quick-actions">
-        <el-button type="primary" size="large" @click="goToTraining">
-          <el-icon><Cpu /></el-icon>
-          新建训练任务
-        </el-button>
-        <el-button type="success" size="large" @click="goToTesting">
-          <el-icon><TrendCharts /></el-icon>
-          新建测试任务
-        </el-button>
-        <el-button type="info" size="large" @click="goToDataAnalysis">
-          <el-icon><DataLine /></el-icon>
-          数据分析
-        </el-button>
-      </div>
-    </el-card>
   </div>
 </template>
 
 <style scoped>
 .workspace-container {
-  padding: 0;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 24px;
+  margin-bottom: 40px;
 }
 
 .stat-card {
-  height: 100px;
-  margin-bottom: 20px;
+  height: 100%;
 }
 
-.stat-content {
+.stat-header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
+  margin-bottom: 16px;
+}
+
+.stat-title {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .stat-icon {
-  width: 60px;
-  height: 60px;
+  color: var(--color-text-secondary);
+  font-size: 18px;
+}
+
+.stat-value {
+  font-size: 32px;
+  font-weight: 600;
+  color: var(--color-text-main);
+  letter-spacing: -0.02em;
+  margin-bottom: 8px;
+}
+
+.stat-change {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.stat-change.positive {
+  color: var(--color-success);
+}
+
+.stat-period {
+  color: var(--color-text-secondary);
+  opacity: 0.7;
+}
+
+.section-header {
+  margin-bottom: 24px;
+}
+
+.section-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-main);
+  margin: 0;
+}
+
+.quick-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 24px;
+  margin-bottom: 40px;
+}
+
+.action-card {
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 24px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+
+.action-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+  border-color: var(--color-primary);
+}
+
+.action-icon {
+  width: 48px;
+  height: 48px;
+  background: #F9FAFB;
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 24px;
+  color: var(--color-text-main);
+  transition: all 0.2s;
+}
+
+.action-card:hover .action-icon {
+  background: var(--color-primary);
   color: white;
-  font-size: 24px;
-  margin-right: 15px;
 }
 
-.stat-value {
-  font-size: 24px;
-  font-weight: bold;
-  color: #303133;
+.action-text {
+  font-weight: 500;
+  color: var(--color-text-main);
 }
 
-.stat-title {
-  font-size: 14px;
-  color: #909399;
-  margin-top: 5px;
+.table-card {
+  margin-bottom: 40px;
 }
 
-.section-card {
-  margin-top: 20px;
-}
-
-.quick-actions {
+.card-header {
   display: flex;
-  gap: 20px;
-  justify-content: center;
-  padding: 20px 0;
+  justify-content: space-between;
+  align-items: center;
 }
 
-.quick-actions .el-button {
-  min-width: 180px;
+.id-cell {
+  font-family: monospace;
+  color: var(--color-text-secondary);
+  background: #F3F4F6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
 }
+
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  background-color: var(--color-text-secondary);
+}
+
+.status-dot.success { background-color: var(--color-success); }
+.status-dot.running { background-color: var(--color-primary); }
+.status-dot.failed { background-color: var(--color-danger); }
 </style>

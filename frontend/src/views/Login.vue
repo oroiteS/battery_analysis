@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import { User, Lock, Message, ElementPlus } from '@element-plus/icons-vue'
+import { User, Lock, Message, Lightning } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { login, register, getMe } from '../api/auth'
 
@@ -73,8 +73,9 @@ const handleLogin = async () => {
         // Fetch user info
         const userRes = await getMe()
         localStorage.setItem('username', userRes.user_name)
+        localStorage.setItem('email', userRes.email)
 
-        ElMessage.success('登录成功')
+        ElMessage.success('欢迎回来')
         router.push('/')
       } catch (error) {
         // Error is handled by interceptor
@@ -119,101 +120,109 @@ const toggleMode = () => {
 
 <template>
   <div class="login-container">
-    <div class="login-box">
-      <div class="login-header">
-        <div class="logo-placeholder">
-          <el-icon :size="40" color="#409EFF"><ElementPlus /></el-icon>
+    <div class="login-content">
+      <div class="brand-section">
+        <div class="logo-circle">
+          <el-icon :size="24" color="white"><Lightning /></el-icon>
         </div>
-        <h2 class="title">储能电池寿命分析平台</h2>
-        <p class="subtitle">Battery Life Analysis & Algorithm Testing Platform</p>
+        <h1 class="brand-title">BatteryAI</h1>
+        <p class="brand-subtitle">储能电池寿命分析平台</p>
       </div>
 
-      <!-- Login Form -->
-      <el-form
-        v-if="!isRegister"
-        ref="loginFormRef"
-        :model="loginForm"
-        :rules="loginRules"
-        class="login-form"
-        size="large"
-      >
-        <el-form-item prop="username">
-          <el-input v-model="loginForm.username" placeholder="用户名 (邮箱)" :prefix-icon="User" />
-        </el-form-item>
+      <div class="form-section">
+        <h2 class="form-title">{{ isRegister ? '注册账号' : '登录' }}</h2>
+        <p class="form-subtitle">
+          {{ isRegister ? '输入您的详细信息以开始使用' : '欢迎回来，请输入您的账号信息' }}
+        </p>
 
-        <el-form-item prop="password">
-          <el-input
-            v-model="loginForm.password"
-            type="password"
-            placeholder="密码"
-            :prefix-icon="Lock"
-            show-password
-            @keyup.enter="handleLogin"
-          />
-        </el-form-item>
+        <!-- Login Form -->
+        <el-form
+          v-if="!isRegister"
+          ref="loginFormRef"
+          :model="loginForm"
+          :rules="loginRules"
+          class="auth-form"
+          size="large"
+          @submit.prevent
+        >
+          <el-form-item prop="username">
+            <el-input 
+              v-model="loginForm.username" 
+              placeholder="用户名或邮箱" 
+              :prefix-icon="User" 
+            />
+          </el-form-item>
 
-        <el-form-item>
-          <el-button type="primary" :loading="loading" class="login-button" @click="handleLogin">
+          <el-form-item prop="password">
+            <el-input
+              v-model="loginForm.password"
+              type="password"
+              placeholder="密码"
+              :prefix-icon="Lock"
+              show-password
+              @keyup.enter="handleLogin"
+            />
+          </el-form-item>
+
+          <el-button type="primary" :loading="loading" class="submit-button" @click="handleLogin">
             登录
           </el-button>
-        </el-form-item>
 
-        <div class="form-footer">
-          <el-link type="info" :underline="false">忘记密码？</el-link>
-          <el-link type="primary" :underline="false" @click="toggleMode">注册账号</el-link>
-        </div>
-      </el-form>
+          <div class="form-footer">
+            <span class="text-muted">还没有账号？</span>
+            <el-button link type="primary" @click="toggleMode">去注册</el-button>
+          </div>
+        </el-form>
 
-      <!-- Register Form -->
-      <el-form
-        v-else
-        ref="registerFormRef"
-        :model="registerForm"
-        :rules="registerRules"
-        class="login-form"
-        size="large"
-      >
-        <el-form-item prop="user_name">
-          <el-input v-model="registerForm.user_name" placeholder="用户名" :prefix-icon="User" />
-        </el-form-item>
+        <!-- Register Form -->
+        <el-form
+          v-else
+          ref="registerFormRef"
+          :model="registerForm"
+          :rules="registerRules"
+          class="auth-form"
+          size="large"
+          @submit.prevent
+        >
+          <el-form-item prop="user_name">
+            <el-input v-model="registerForm.user_name" placeholder="用户名" :prefix-icon="User" />
+          </el-form-item>
 
-        <el-form-item prop="email">
-          <el-input v-model="registerForm.email" placeholder="邮箱" :prefix-icon="Message" />
-        </el-form-item>
+          <el-form-item prop="email">
+            <el-input v-model="registerForm.email" placeholder="邮箱" :prefix-icon="Message" />
+          </el-form-item>
 
-        <el-form-item prop="password">
-          <el-input
-            v-model="registerForm.password"
-            type="password"
-            placeholder="密码"
-            :prefix-icon="Lock"
-            show-password
-          />
-        </el-form-item>
+          <el-form-item prop="password">
+            <el-input
+              v-model="registerForm.password"
+              type="password"
+              placeholder="密码"
+              :prefix-icon="Lock"
+              show-password
+            />
+          </el-form-item>
 
-        <el-form-item prop="confirmPassword">
-          <el-input
-            v-model="registerForm.confirmPassword"
-            type="password"
-            placeholder="确认密码"
-            :prefix-icon="Lock"
-            show-password
-            @keyup.enter="handleRegister"
-          />
-        </el-form-item>
+          <el-form-item prop="confirmPassword">
+            <el-input
+              v-model="registerForm.confirmPassword"
+              type="password"
+              placeholder="确认密码"
+              :prefix-icon="Lock"
+              show-password
+              @keyup.enter="handleRegister"
+            />
+          </el-form-item>
 
-        <el-form-item>
-          <el-button type="primary" :loading="loading" class="login-button" @click="handleRegister">
-            注册
+          <el-button type="primary" :loading="loading" class="submit-button" @click="handleRegister">
+            创建账号
           </el-button>
-        </el-form-item>
 
-        <div class="form-footer" style="justify-content: center">
-          <el-link type="primary" :underline="false" @click="toggleMode"
-            >已有账号？立即登录</el-link
-          >
-        </div>
-      </el-form>
+          <div class="form-footer">
+            <span class="text-muted">已有账号？</span>
+            <el-button link type="primary" @click="toggleMode">去登录</el-button>
+          </div>
+        </el-form>
+      </div>
     </div>
   </div>
 </template>
@@ -224,56 +233,144 @@ const toggleMode = () => {
   display: flex;
   justify-content: center;
   align-items: center;
-  background-color: #f0f2f5;
-  background-image: url('https://gw.alipayobjects.com/zos/rmsportal/TVYTbAXWheQpRcWDaDMu.svg'); /* Optional background pattern */
-  background-repeat: no-repeat;
-  background-position: center 110px;
-  background-size: 100%;
+  background-color: #F3F4F6;
 }
 
-.login-box {
-  width: 400px;
-  padding: 40px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.login-header {
-  text-align: center;
-  margin-bottom: 40px;
-}
-
-.logo-placeholder {
-  margin-bottom: 16px;
+.login-content {
   display: flex;
+  background: white;
+  border-radius: 24px;
+  overflow: hidden;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 10px 10px -5px rgba(0, 0, 0, 0.01);
+  width: 900px;
+  max-width: 95%;
+  height: 600px;
+}
+
+.brand-section {
+  flex: 1;
+  background-color: var(--color-primary);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: white;
+  padding: 40px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Abstract shapes for decoration */
+.brand-section::before {
+  content: '';
+  position: absolute;
+  top: -50px;
+  left: -50px;
+  width: 200px;
+  height: 200px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 50%;
+}
+
+.brand-section::after {
+  content: '';
+  position: absolute;
+  bottom: -50px;
+  right: -50px;
+  width: 300px;
+  height: 300px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 50%;
+}
+
+.logo-circle {
+  width: 64px;
+  height: 64px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 24px;
+  backdrop-filter: blur(10px);
+}
+
+.brand-title {
+  font-size: 32px;
+  font-weight: 700;
+  margin: 0 0 12px 0;
+  letter-spacing: -0.02em;
+}
+
+.brand-subtitle {
+  font-size: 16px;
+  opacity: 0.7;
+  font-weight: 300;
+  margin: 0;
+  text-align: center;
+  max-width: 80%;
+}
+
+.form-section {
+  flex: 1;
+  padding: 60px;
+  display: flex;
+  flex-direction: column;
   justify-content: center;
 }
 
-.title {
-  margin: 0;
+.form-title {
   font-size: 24px;
-  color: #303133;
   font-weight: 600;
+  color: var(--color-text-main);
+  margin: 0 0 8px 0;
 }
 
-.subtitle {
-  margin: 8px 0 0;
+.form-subtitle {
+  color: var(--color-text-secondary);
   font-size: 14px;
-  color: #909399;
+  margin: 0 0 32px 0;
 }
 
-.login-form {
-  margin-top: 20px;
-}
-
-.login-button {
+.auth-form {
   width: 100%;
 }
 
+.submit-button {
+  width: 100%;
+  height: 44px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 16px;
+}
+
 .form-footer {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 10px;
+  margin-top: 24px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.text-muted {
+  color: var(--color-text-secondary);
+  margin-right: 8px;
+}
+
+@media (max-width: 768px) {
+  .login-content {
+    flex-direction: column;
+    height: auto;
+    width: 100%;
+    margin: 20px;
+    border-radius: 16px;
+  }
+  
+  .brand-section {
+    padding: 30px;
+    min-height: 200px;
+  }
+  
+  .form-section {
+    padding: 30px;
+  }
 }
 </style>
