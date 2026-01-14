@@ -233,6 +233,7 @@ export interface TestJobResponse {
   created_at: string
   started_at: string | null
   finished_at: string | null
+  model_name?: string | null // 模型名称（算法 | 时间 | 目标）
 }
 
 export interface TestJobDetail {

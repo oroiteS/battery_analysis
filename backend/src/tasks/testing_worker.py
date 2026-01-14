@@ -725,14 +725,41 @@ class TestingWorker:
                 # 注意：当前模型只训练了PCL，所以只保存PCL结果
                 # 如果需要RUL，需要使用专门训练RUL的模型
                 self._log("INFO", "保存PCL预测结果...")
+                self._push_ws_message(
+                    "progress",
+                    {
+                        "test_job_id": self.job_id,
+                        "progress": 0.7,
+                        "stage": "saving_predictions",
+                        "message": "保存PCL预测结果",
+                    },
+                )
                 self._save_predictions(
                     battery_indices, cycle_nums, y_true, y_pred, "PCL"
+                )
+                self._push_ws_message(
+                    "progress",
+                    {
+                        "test_job_id": self.job_id,
+                        "progress": 0.8,
+                        "stage": "calculating_metrics",
+                        "message": "计算PCL评估指标",
+                    },
                 )
                 self._calculate_and_save_metrics(battery_indices, y_true, y_pred, "PCL")
 
                 # 对于RUL，我们需要从数据库读取真实RUL值并使用相同的预测
                 # 这是一个简化处理，实际应该使用专门的RUL模型
                 self._log("INFO", "保存RUL预测结果（使用PCL模型的输出）...")
+                self._push_ws_message(
+                    "progress",
+                    {
+                        "test_job_id": self.job_id,
+                        "progress": 0.85,
+                        "stage": "saving_predictions",
+                        "message": "保存RUL预测结果",
+                    },
+                )
                 rul_true_list, rul_pred_list = self._save_rul_predictions_from_pcl(
                     battery_indices, cycle_nums, y_pred
                 )
@@ -740,6 +767,15 @@ class TestingWorker:
                 # 计算并保存RUL指标
                 if len(rul_true_list) > 0:
                     self._log("INFO", "计算RUL指标...")
+                    self._push_ws_message(
+                        "progress",
+                        {
+                            "test_job_id": self.job_id,
+                            "progress": 0.95,
+                            "stage": "calculating_metrics",
+                            "message": "计算RUL评估指标",
+                        },
+                    )
                     rul_true_array = np.array(rul_true_list)
                     rul_pred_array = np.array(rul_pred_list)
                     # 使用实际保存的电池索引
@@ -785,6 +821,15 @@ class TestingWorker:
                     battery_indices, y_true, y_pred, target
                 )
 
+            self._push_ws_message(
+                "progress",
+                {
+                    "test_job_id": self.job_id,
+                    "progress": 1.0,
+                    "stage": "completed",
+                    "message": "测试任务完成",
+                },
+            )
             self._update_job_status("SUCCEEDED")
             self._log("INFO", "测试任务完成")
 

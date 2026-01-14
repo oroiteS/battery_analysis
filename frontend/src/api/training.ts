@@ -13,7 +13,7 @@ import type {
  * @returns 创建的训练任务信息
  */
 export const createTrainingJob = (data: CreateTrainingJobRequest): Promise<TrainingJobResponse> => {
-  return service.post<any, TrainingJobResponse>('/v1/training/jobs', data)
+  return service.post<TrainingJobResponse, TrainingJobResponse>('/v1/training/jobs', data)
 }
 
 /**
@@ -26,7 +26,9 @@ export const listTrainingJobs = (params?: {
   limit?: number
   offset?: number
 }): Promise<TrainingJobResponse[]> => {
-  return service.get<any, TrainingJobResponse[]>('/v1/training/jobs', { params })
+  return service.get<TrainingJobResponse[], TrainingJobResponse[]>('/v1/training/jobs', {
+    params,
+  })
 }
 
 /**
@@ -35,7 +37,9 @@ export const listTrainingJobs = (params?: {
  * @returns 训练任务详细信息（包含runs和batteries）
  */
 export const getTrainingJob = (jobId: number): Promise<TrainingJobDetailResponse> => {
-  return service.get<any, TrainingJobDetailResponse>(`/v1/training/jobs/${jobId}`)
+  return service.get<TrainingJobDetailResponse, TrainingJobDetailResponse>(
+    `/v1/training/jobs/${jobId}`,
+  )
 }
 
 /**
@@ -43,7 +47,7 @@ export const getTrainingJob = (jobId: number): Promise<TrainingJobDetailResponse
  * @param jobId 任务ID
  */
 export const deleteTrainingJob = (jobId: number): Promise<void> => {
-  return service.delete<any, void>(`/v1/training/jobs/${jobId}`)
+  return service.delete<void, void>(`/v1/training/jobs/${jobId}`)
 }
 
 /**
@@ -56,7 +60,7 @@ export const getTrainingMetrics = (
   jobId: number,
   runId: number,
 ): Promise<TrainingMetricsResponse> => {
-  return service.get<any, TrainingMetricsResponse>(
+  return service.get<TrainingMetricsResponse, TrainingMetricsResponse>(
     `/v1/training/jobs/${jobId}/runs/${runId}/metrics`,
   )
 }
@@ -73,8 +77,23 @@ export const getTrainingLogs = (
   runId: number,
   params?: { level?: string; limit?: number },
 ): Promise<TrainingLogsResponse> => {
-  return service.get<any, TrainingLogsResponse>(`/v1/training/jobs/${jobId}/runs/${runId}/logs`, {
-    params,
+  return service.get<TrainingLogsResponse, TrainingLogsResponse>(
+    `/v1/training/jobs/${jobId}/runs/${runId}/logs`,
+    {
+      params,
+    },
+  )
+}
+
+/**
+ * 下载训练日志文件
+ * @param jobId 任务ID
+ * @param runId 运行ID
+ * @returns 日志文件Blob
+ */
+export const downloadTrainingJobLogs = (jobId: number, runId: number): Promise<Blob> => {
+  return service.get<Blob, Blob>(`/v1/training/jobs/${jobId}/runs/${runId}/logs/download`, {
+    responseType: 'blob',
   })
 }
 

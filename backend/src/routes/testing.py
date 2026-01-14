@@ -7,7 +7,7 @@
 
 import asyncio
 import queue
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated, Any, Dict, Optional, cast
 
 from fastapi import (
@@ -131,6 +131,7 @@ class TestJobResponse(BaseModel):
     created_at: datetime
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
+    model_name: str | None = None  # 模型名称（算法 | 版本）
 
     class Config:
         from_attributes = True
@@ -304,6 +305,37 @@ async def get_test_job(
     )
 
 
+@router.delete("/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_test_job(
+    job_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db),
+):
+    """
+    删除测试任务（软删除）
+
+    - 仅任务所有者可以删除
+    - 软删除：设置 deleted_at 字段
+    """
+    # 查询任务
+    job = (
+        db.query(TestJob)
+        .filter(TestJob.id == job_id, TestJob.user_id == current_user.id)
+        .first()
+    )
+
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="测试任务不存在或无权限"
+        )
+
+    # 软删除：设置 deleted_at
+    setattr(job, "deleted_at", datetime.now(timezone.utc))
+    db.commit()
+
+    return None
+
+
 @router.get("/jobs", response_model=list[TestJobResponse])
 async def list_test_jobs(
     current_user: Annotated[User, Depends(get_current_user)],
@@ -317,15 +349,40 @@ async def list_test_jobs(
 
     - 支持按状态筛选
     - 分页查询
+    - 过滤已软删除的任务
     """
-    query = db.query(TestJob).filter(TestJob.user_id == current_user.id)
+    query = db.query(TestJob).filter(
+        TestJob.user_id == current_user.id,
+        TestJob.deleted_at.is_(None),  # 过滤软删除的任务
+    )
 
     if status_filter:
         query = query.filter(TestJob.status == status_filter)
 
     jobs = query.order_by(TestJob.created_at.desc()).offset(offset).limit(limit).all()
 
-    return [TestJobResponse.model_validate(job) for job in jobs]
+    # 填充 model_name
+    result = []
+    for job in jobs:
+        job_dict = TestJobResponse.model_validate(job).model_dump()
+
+        # 获取模型版本信息
+        model_version = (
+            db.query(ModelVersion)
+            .filter(ModelVersion.id == job.model_version_id)
+            .first()
+        )
+
+        if model_version:
+            # 格式化模型名称：算法 | 创建时间 | 目标
+            created_at = model_version.created_at.strftime("%Y/%m/%d %H:%M")
+            job_dict["model_name"] = (
+                f"{model_version.algorithm} | {created_at} | {model_version.target}"
+            )
+
+        result.append(TestJobResponse(**job_dict))
+
+    return result
 
 
 @router.get("/jobs/{job_id}/metrics")
