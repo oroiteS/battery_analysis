@@ -87,6 +87,9 @@ const modelOptions = computed(() => {
     }
     const algoName = algoNames[m.algorithm] || m.algorithm
 
+    // 训练目标显示
+    const targetStr = m.target
+
     // 提取关键指标
     const metrics = m.metrics
     let metricsStr = ''
@@ -98,7 +101,7 @@ const modelOptions = computed(() => {
 
     return {
       value: m.id,
-      label: `${algoName} | ${dateStr} | ${metricsStr}`,
+      label: `${algoName} | ${dateStr} | ${targetStr}`,
     }
   })
 })

@@ -563,7 +563,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TrainingJobResponse'
+                $ref: "#/components/schemas/TrainingJobResponse"
 
     get:
       tags: [Training]
@@ -593,7 +593,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/TrainingJobResponse'
+                  $ref: "#/components/schemas/TrainingJobResponse"
 
   /training/jobs/{job_id}:
     get:
@@ -616,11 +616,11 @@ paths:
                 type: object
                 properties:
                   job:
-                    $ref: '#/components/schemas/TrainingJobResponse'
+                    $ref: "#/components/schemas/TrainingJobResponse"
                   runs:
                     type: array
                     items:
-                      $ref: '#/components/schemas/TrainingRunResponse'
+                      $ref: "#/components/schemas/TrainingRunResponse"
                   batteries:
                     type: array
                     items:
@@ -750,6 +750,40 @@ paths:
                   message:
                     type: string
 
+  /training/jobs/{job_id}/runs/{run_id}/logs/download:
+    get:
+      tags: [Training]
+      summary: 下载训练日志文件
+      description: 下载完整的训练日志文件供离线分析
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功返回日志文件
+          content:
+            text/plain:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: 'attachment; filename="training_job_{job_id}_{algorithm}_{timestamp}.log"'
+        "404":
+          description: 训练任务、运行记录或日志文件不存在
+
   # ==========================================
   # Models
   # ==========================================
@@ -782,7 +816,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/ModelVersionResponse'
+                  $ref: "#/components/schemas/ModelVersionResponse"
 
   /models/versions/{version_id}:
     get:
@@ -805,7 +839,7 @@ paths:
                 type: object
                 properties:
                   model:
-                    $ref: '#/components/schemas/ModelVersionResponse'
+                    $ref: "#/components/schemas/ModelVersionResponse"
                   training_info:
                     type: object
                     nullable: true
@@ -911,7 +945,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TestJobResponse'
+                $ref: "#/components/schemas/TestJobResponse"
 
     get:
       tags: [Testing]
@@ -941,7 +975,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/TestJobResponse'
+                  $ref: "#/components/schemas/TestJobResponse"
 
   /testing/jobs/{job_id}:
     get:
@@ -964,7 +998,7 @@ paths:
                 type: object
                 properties:
                   job:
-                    $ref: '#/components/schemas/TestJobResponse'
+                    $ref: "#/components/schemas/TestJobResponse"
                   model_info:
                     type: object
                   batteries:
@@ -1271,6 +1305,11 @@ components:
           type: integer
         algorithm:
           type: string
+          enum: [BASELINE, BILSTM, DEEPHPM]
+        target:
+          type: string
+          enum: [RUL, PCL]
+          description: 训练目标（从训练任务继承）
         name:
           type: string
         version:

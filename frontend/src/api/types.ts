@@ -191,6 +191,7 @@ export interface ModelVersion {
   user_id: number
   run_id: number
   algorithm: string
+  target: string // 训练目标: RUL, PCL, 或 BOTH
   name: string
   version: string
   config: Record<string, any>
