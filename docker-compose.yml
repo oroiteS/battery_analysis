@@ -11,8 +11,6 @@ services:
       - db_data:/var/lib/mysql
     ports:
       - "3306:3306"
-    networks:
-      - app_network
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -35,12 +33,12 @@ services:
       DB_NAME: battery_db
       UPLOAD_PATH: storage/uploads
       MODEL_STORAGE_PATH: storage/models
+      # 设置一个足够长的 SECRET_KEY (至少32字符)
+      SECRET_KEY: "super_secret_key_for_battery_analysis_platform_2026"
     volumes:
       - ./backend/storage:/app/storage
     ports:
       - "8000:8000"
-    networks:
-      - app_network
 
   # 前端服务
   frontend:
@@ -51,12 +49,6 @@ services:
       - backend
     ports:
       - "80:80"
-    networks:
-      - app_network
 
 volumes:
   db_data:
-
-networks:
-  app_network:
-    driver: bridge
