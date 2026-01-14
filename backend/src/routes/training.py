@@ -565,6 +565,85 @@ async def delete_training_job(
     return None
 
 
+@router.get("/jobs/{job_id}/runs/{run_id}/logs/download")
+async def download_training_logs(
+    job_id: int,
+    run_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db),
+):
+    """
+    下载训练日志文件
+
+    返回日志文件供前端下载
+    """
+    from fastapi.responses import FileResponse
+
+    from src.config import settings
+
+    # 验证任务所有权（过滤已删除的）
+    job = (
+        db.query(TrainingJob)
+        .filter(
+            TrainingJob.id == job_id,
+            TrainingJob.user_id == current_user.id,
+            TrainingJob.deleted_at.is_(None),  # 过滤已删除的任务
+        )
+        .first()
+    )
+
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="训练任务不存在"
+        )
+
+    # 验证运行记录
+    run = (
+        db.query(TrainingJobRun)
+        .filter(TrainingJobRun.id == run_id, TrainingJobRun.job_id == job_id)
+        .first()
+    )
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="运行记录不存在"
+        )
+
+    # 查询日志文件路径
+    log_record = (
+        db.query(TrainingJobRunLog).filter(TrainingJobRunLog.run_id == run_id).first()
+    )
+
+    if not log_record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="日志文件尚未创建"
+        )
+
+    # 构建完整路径
+    log_file_path = settings.BASE_DIR / log_record.log_file_path
+
+    if not log_file_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="日志文件不存在"
+        )
+
+    # 生成友好的文件名
+    # 格式: training_job_{job_id}_{algorithm}_{timestamp}.log
+    algorithm = str(run.algorithm).lower()
+    timestamp = get_local_now().strftime("%Y%m%d_%H%M%S")
+    filename = f"training_job_{job_id}_{algorithm}_{timestamp}.log"
+
+    # 返回文件
+    return FileResponse(
+        path=str(log_file_path),
+        filename=filename,
+        media_type="text/plain",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
 class ConnectionManager:
     """WebSocket 连接管理器（支持跨线程消息推送）"""
 
