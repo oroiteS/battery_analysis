@@ -8,27 +8,31 @@ import type {
 } from './types'
 
 export const getBatteryStats = (batteryId: number) => {
-  return service.get<any, FeatureStat[]>(`/v1/data/batteries/${batteryId}/stats`)
+  return service.get<FeatureStat[], FeatureStat[]>(`/v1/data/batteries/${batteryId}/stats`)
 }
 
 export const getTrendData = (batteryId: number, featureName: string) => {
-  return service.get<any, TrendData>(`/v1/data/batteries/${batteryId}/trend`, {
+  return service.get<TrendData, TrendData>(`/v1/data/batteries/${batteryId}/trend`, {
     params: { feature_name: featureName },
   })
 }
 
 export const getScatterData = (batteryId: number, featureName: string) => {
-  return service.get<any, ScatterData>(`/v1/data/batteries/${batteryId}/scatter`, {
+  return service.get<ScatterData, ScatterData>(`/v1/data/batteries/${batteryId}/scatter`, {
     params: { feature_name: featureName },
   })
 }
 
 export const getPCLDistribution = (batteryId: number) => {
-  return service.get<any, PCLDistribution>(`/v1/data/batteries/${batteryId}/pcl-distribution`)
+  return service.get<PCLDistribution, PCLDistribution>(
+    `/v1/data/batteries/${batteryId}/pcl-distribution`,
+  )
 }
 
 export const getCorrelationMatrix = (batteryId: number) => {
-  return service.get<any, CorrelationMatrix>(`/v1/data/batteries/${batteryId}/correlation-matrix`)
+  return service.get<CorrelationMatrix, CorrelationMatrix>(
+    `/v1/data/batteries/${batteryId}/correlation-matrix`,
+  )
 }
 
 /**

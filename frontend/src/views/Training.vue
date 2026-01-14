@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, watch, onUnmounted, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import { getDatasets, getBatteries } from '../api/data'
@@ -12,6 +13,7 @@ import {
   getTrainingWebSocketUrl,
   getTrainingMetrics,
   getTrainingLogs,
+  downloadTrainingJobLogs,
 } from '../api/training'
 import type {
   Dataset,
@@ -128,10 +130,13 @@ const logs = ref<TrainingLog[]>([])
 const chartInstance = ref<echarts.ECharts | null>(null)
 const chartRef = ref<HTMLElement | null>(null)
 const isLogScale = ref(true) // 默认开启对数坐标，避免Loss差异过大导致挤压
+const selectedRunId = ref<number | null>(null) // 当前选中的算法run ID
 
 // --- WebSocket ---
 const ws = ref<WebSocket | null>(null)
 const wsJobId = ref<number | null>(null)
+const route = useRoute()
+const lastOpenedJobId = ref<number | null>(null)
 
 const connectWebSocket = (jobId: number) => {
   if (ws.value && ws.value.readyState === WebSocket.OPEN) {
@@ -162,9 +167,12 @@ const connectWebSocket = (jobId: number) => {
         }
       }
       if (job && message.type === 'job_status_change') {
+        const newStatus = message.data?.new_status ?? message.status
         trainingJobs.value[jobIndex] = {
           ...job,
-          status: message.data?.new_status ?? message.status,
+          status: newStatus,
+          // 任务完成时强制进度为1.0 (表示100%)
+          progress: newStatus === 'SUCCEEDED' || newStatus === 'FAILED' ? 1.0 : job.progress,
         }
       }
     }
@@ -217,6 +225,12 @@ const handleDetailMessage = (message: any) => {
       // Update chart with multiple loss metrics
       if (chartInstance.value && message.data) {
         const data = message.data
+
+        // 仅更新选中算法的数据
+        if (data.run_id !== selectedRunId.value) {
+          break
+        }
+
         const option = chartInstance.value.getOption() as any
 
         // 检查该epoch是否已存在（避免重复添加）
@@ -314,7 +328,12 @@ const initData = async () => {
     ])
     datasets.value = datasetsRes
     algorithms.value = algosRes.algorithms
-    trainingJobs.value = jobsRes
+
+    // 修正已完成任务的进度显示
+    trainingJobs.value = jobsRes.map((job) => ({
+      ...job,
+      progress: job.status === 'SUCCEEDED' || job.status === 'FAILED' ? 1.0 : job.progress,
+    }))
 
     if (datasets.value.length > 0 && datasets.value[0]) {
       form.datasetId = datasets.value[0].id
@@ -448,18 +467,16 @@ const showDetail = async (jobId: number) => {
     detailVisible.value = true
     logs.value = [] // Clear logs
 
+    // 设置默认选中第一个算法
+    if (res.runs && res.runs.length > 0) {
+      selectedRunId.value = res.runs[0].id
+    }
+
     // If job is running, ensure WS is connected
     if (res.job.status === 'RUNNING' && wsJobId.value !== jobId) {
       connectWebSocket(jobId)
     }
 
-<<<<<<< Updated upstream
-    // Fetch historical logs if needed (simplified here)
-    // const logRes = await getTrainingLogs(jobId, res.runs[0].id)
-    // logs.value = logRes.logs
-
-    // Chart initialization is now handled by @opened event of el-dialog
-=======
     // Init Chart after dialog opens
     await nextTick()
     initChart()
@@ -469,7 +486,6 @@ const showDetail = async (jobId: number) => {
 
     // Load historical logs for all runs
     await loadHistoricalLogs(jobId, res.runs)
->>>>>>> Stashed changes
   } catch (error: any) {
     console.error('Get job detail failed:', error)
     ElMessage.error(error?.response?.data?.detail || '获取任务详情失败')
@@ -478,47 +494,54 @@ const showDetail = async (jobId: number) => {
 
 // 加载历史指标数据
 const loadHistoricalMetrics = async (jobId: number, runs: any[]) => {
-  if (!chartInstance.value) return
+  if (!chartInstance.value || !selectedRunId.value) return
 
-  for (const run of runs) {
-    try {
-      const metricsRes = await getTrainingMetrics(jobId, run.id)
-      const metrics = metricsRes.metrics
+  // 仅加载选中算法的数据
+  const selectedRun = runs.find((r) => r.id === selectedRunId.value)
+  if (!selectedRun) return
 
-      if (metrics && metrics.length > 0) {
-        const option = chartInstance.value.getOption() as any
+  try {
+    const metricsRes = await getTrainingMetrics(jobId, selectedRun.id)
+    const metrics = metricsRes.metrics
 
-        // 批量添加历史数据到图表
-        metrics.forEach((m: any) => {
-          const epoch = m.epoch + 1 // epoch从0开始，显示时+1
+    if (metrics && metrics.length > 0) {
+      const option = chartInstance.value.getOption() as any
 
-          // 添加基础损失
-          if (m.train_loss !== undefined && option.series[0]) {
-            option.series[0].data.push([epoch, m.train_loss])
+      // 清空旧数据
+      option.series.forEach((s: any) => {
+        s.data = []
+      })
+
+      // 批量添加历史数据到图表
+      metrics.forEach((m: any) => {
+        const epoch = m.epoch + 1 // epoch从0开始，显示时+1
+
+        // 添加基础损失
+        if (m.train_loss !== undefined && option.series[0]) {
+          option.series[0].data.push([epoch, m.train_loss])
+        }
+        if (m.val_loss !== undefined && option.series[1]) {
+          option.series[1].data.push([epoch, m.val_loss])
+        }
+
+        // 添加额外的损失分量（如果存在）
+        if (m.metrics) {
+          if (m.metrics.loss_U !== undefined && option.series[2]) {
+            option.series[2].data.push([epoch, m.metrics.loss_U])
           }
-          if (m.val_loss !== undefined && option.series[1]) {
-            option.series[1].data.push([epoch, m.val_loss])
+          if (m.metrics.loss_F !== undefined && option.series[3]) {
+            option.series[3].data.push([epoch, m.metrics.loss_F])
           }
-
-          // 添加额外的损失分量（如果存在）
-          if (m.metrics) {
-            if (m.metrics.loss_U !== undefined && option.series[2]) {
-              option.series[2].data.push([epoch, m.metrics.loss_U])
-            }
-            if (m.metrics.loss_F !== undefined && option.series[3]) {
-              option.series[3].data.push([epoch, m.metrics.loss_F])
-            }
-            if (m.metrics.loss_F_t !== undefined && option.series[4]) {
-              option.series[4].data.push([epoch, m.metrics.loss_F_t])
-            }
+          if (m.metrics.loss_F_t !== undefined && option.series[4]) {
+            option.series[4].data.push([epoch, m.metrics.loss_F_t])
           }
-        })
+        }
+      })
 
-        chartInstance.value.setOption(option)
-      }
-    } catch (error) {
-      console.error(`Failed to load metrics for run ${run.id}:`, error)
+      chartInstance.value.setOption(option)
     }
+  } catch (error) {
+    console.error(`Failed to load metrics for run ${selectedRun.id}:`, error)
   }
 }
 
@@ -596,26 +619,27 @@ const handleDelete = async (jobId: number) => {
 
 const handleDownloadLogs = async () => {
   if (!currentJob.value) return
-  
-  // 预留接口：等待后端实现日志文件传输
-  // const jobId = currentJob.value.job.id
-  ElMessage.info('日志下载功能已就绪，等待后端接口对接')
-  
-  // 实际代码逻辑示例 (待后端接口完成后取消注释):
-  /*
+
+  const jobId = currentJob.value.job.id
+  const runId = selectedRunId.value
+  if (!runId) {
+    ElMessage.warning('请先选择算法')
+    return
+  }
+
   try {
-    const response = await downloadTrainingJobLogs(jobId)
+    const response = await downloadTrainingJobLogs(jobId, runId)
     const url = window.URL.createObjectURL(new Blob([response]))
     const link = document.createElement('a')
     link.href = url
-    link.setAttribute('download', `training_job_${jobId}.log`)
+    link.setAttribute('download', `training_job_${jobId}_run_${runId}.log`)
     document.body.appendChild(link)
     link.click()
+    document.body.removeChild(link)
     window.URL.revokeObjectURL(url)
   } catch (error) {
     ElMessage.error('下载日志失败')
   }
-  */
 }
 
 const handleDialogOpened = () => {
@@ -653,14 +677,12 @@ const initChart = () => {
       left: 'center',
       textStyle: {
         fontSize: 16,
-        fontWeight: 'normal'
+        fontWeight: 'normal',
       },
     },
     toolbox: {
       feature: {
-        dataZoom: { yAxisIndex: 'none' },
-        restore: {},
-        saveAsImage: {}
+        saveAsImage: { title: '下载为图片' },
       },
     },
     tooltip: {
@@ -709,7 +731,9 @@ const initChart = () => {
       name: 'Loss',
       nameLocation: 'end',
       scale: true,
-      min: isLogScale.value ? (value: { min: number }) => (value.min > 0 ? value.min * 0.9 : null) : null,
+      min: isLogScale.value
+        ? (value: { min: number }) => (value.min > 0 ? value.min * 0.9 : null)
+        : null,
       axisLabel: {
         formatter: (value: number) => value.toExponential(2),
       },
@@ -787,9 +811,16 @@ watch(isLogScale, (newVal) => {
     chartInstance.value.setOption({
       yAxis: {
         type: newVal ? 'log' : 'value',
-        min: newVal ? (value: { min: number }) => (value.min > 0 ? value.min * 0.9 : null) : null
-      }
+        min: newVal ? (value: { min: number }) => (value.min > 0 ? value.min * 0.9 : null) : null,
+      },
     })
+  }
+})
+
+// 监听算法选择变化，重新加载数据
+watch(selectedRunId, async (newRunId) => {
+  if (newRunId && currentJob.value) {
+    await loadHistoricalMetrics(currentJob.value.job.id, currentJob.value.runs)
   }
 })
 
@@ -834,7 +865,12 @@ const formatLogTime = (timestamp: string) => {
 }
 
 onMounted(() => {
-  initData()
+  const init = async () => {
+    await initData()
+    await openJobFromRoute()
+  }
+
+  void init()
 })
 
 onUnmounted(() => {
@@ -846,6 +882,26 @@ onUnmounted(() => {
     chartInstance.value.dispose()
   }
 })
+
+const openJobFromRoute = async () => {
+  const jobIdParam = route.query.jobId
+  const jobIdValue = Array.isArray(jobIdParam) ? jobIdParam[0] : jobIdParam
+  const jobId = jobIdValue ? Number(jobIdValue) : NaN
+  if (!Number.isFinite(jobId) || jobId === lastOpenedJobId.value) {
+    return
+  }
+
+  lastOpenedJobId.value = jobId
+  activeTab.value = 'monitor'
+  await showDetail(jobId)
+}
+
+watch(
+  () => route.query.jobId,
+  () => {
+    void openJobFromRoute()
+  },
+)
 </script>
 
 <template>
@@ -1246,6 +1302,18 @@ onUnmounted(() => {
 
           <el-tab-pane label="实时指标" name="metrics">
             <div class="chart-controls">
+              <el-select
+                v-model="selectedRunId"
+                placeholder="选择算法"
+                style="width: 200px; margin-right: 20px"
+              >
+                <el-option
+                  v-for="run in currentJob?.runs"
+                  :key="run.id"
+                  :label="`${run.algorithm} (${run.status})`"
+                  :value="run.id"
+                />
+              </el-select>
               <el-switch
                 v-model="isLogScale"
                 active-text="对数坐标 (Log Scale)"

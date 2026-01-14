@@ -21,21 +21,23 @@ const handleLogout = () => {
   ElMessageBox.confirm('确定要退出登录吗？', '提示', {
     confirmButtonText: '确定',
     cancelButtonText: '取消',
-    type: 'warning'
-  }).then(async () => {
-    try {
-      await logout()
-    } catch (e) {
-      console.error('Logout failed', e)
-    } finally {
-      localStorage.removeItem('token')
-      localStorage.removeItem('username')
-      ElMessage.success('已退出登录')
-      router.push('/login')
-    }
-  }).catch(() => {
-    // cancel
+    type: 'warning',
   })
+    .then(async () => {
+      try {
+        await logout()
+      } catch (e) {
+        console.error('Logout failed', e)
+      } finally {
+        localStorage.removeItem('token')
+        localStorage.removeItem('username')
+        ElMessage.success('已退出登录')
+        router.push('/login')
+      }
+    })
+    .catch(() => {
+      // cancel
+    })
 }
 </script>
 
@@ -79,10 +81,19 @@ const handleLogout = () => {
           <div class="breadcrumb">
             <el-breadcrumb separator="/">
               <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
-              <el-breadcrumb-item v-if="route.path !== '/'">{{ route.meta.title }}</el-breadcrumb-item>
+              <el-breadcrumb-item v-if="route.path !== '/'">{{
+                route.meta.title
+              }}</el-breadcrumb-item>
             </el-breadcrumb>
           </div>
-          <el-dropdown trigger="click" @command="(command: string | number | object) => { if(command === 'logout') handleLogout() }">
+          <el-dropdown
+            trigger="click"
+            @command="
+              (command: string | number | object) => {
+                if (command === 'logout') handleLogout()
+              }
+            "
+          >
             <div class="user-info">
               <el-avatar :size="32" icon="UserFilled" />
               <span class="username">{{ username }}</span>
@@ -90,8 +101,7 @@ const handleLogout = () => {
             </div>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="profile">个人中心</el-dropdown-item>
-                <el-dropdown-item divided command="logout">退出登录</el-dropdown-item>
+                <el-dropdown-item command="logout">退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>

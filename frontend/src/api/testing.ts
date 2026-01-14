@@ -15,7 +15,7 @@ import type {
  * @returns 测试任务响应
  */
 export const createTestJob = (request: CreateTestJobRequest): Promise<TestJobResponse> => {
-  return service.post<any, TestJobResponse>('/v1/testing/jobs', request)
+  return service.post<TestJobResponse, TestJobResponse>('/v1/testing/jobs', request)
 }
 
 /**
@@ -24,7 +24,7 @@ export const createTestJob = (request: CreateTestJobRequest): Promise<TestJobRes
  * @returns 测试任务详情
  */
 export const getTestJob = (jobId: number): Promise<TestJobDetail> => {
-  return service.get<any, TestJobDetail>(`/v1/testing/jobs/${jobId}`)
+  return service.get<TestJobDetail, TestJobDetail>(`/v1/testing/jobs/${jobId}`)
 }
 
 /**
@@ -37,7 +37,16 @@ export const listTestJobs = (params?: {
   limit?: number
   offset?: number
 }): Promise<TestJobResponse[]> => {
-  return service.get<any, TestJobResponse[]>('/v1/testing/jobs', { params })
+  return service.get<TestJobResponse[], TestJobResponse[]>('/v1/testing/jobs', { params })
+}
+
+/**
+ * 删除测试任务
+ * @param jobId 任务ID
+ * @returns 删除结果
+ */
+export const deleteTestJob = (jobId: number): Promise<void> => {
+  return service.delete<void, void>(`/v1/testing/jobs/${jobId}`)
 }
 
 /**
@@ -46,7 +55,7 @@ export const listTestJobs = (params?: {
  * @returns 测试指标
  */
 export const getTestMetrics = (jobId: number): Promise<TestMetrics> => {
-  return service.get<any, TestMetrics>(`/v1/testing/jobs/${jobId}/metrics`)
+  return service.get<TestMetrics, TestMetrics>(`/v1/testing/jobs/${jobId}/metrics`)
 }
 
 /**
@@ -59,9 +68,12 @@ export const getTestPredictions = (
   jobId: number,
   batteryId?: number,
 ): Promise<TestPredictionsResponse> => {
-  return service.get<any, TestPredictionsResponse>(`/v1/testing/jobs/${jobId}/predictions`, {
-    params: batteryId ? { battery_id: batteryId } : undefined,
-  })
+  return service.get<TestPredictionsResponse, TestPredictionsResponse>(
+    `/v1/testing/jobs/${jobId}/predictions`,
+    {
+      params: batteryId ? { battery_id: batteryId } : undefined,
+    },
+  )
 }
 
 /**
@@ -77,7 +89,9 @@ export const getTestLogs = (
     limit?: number
   },
 ): Promise<TestLogsResponse> => {
-  return service.get<any, TestLogsResponse>(`/v1/testing/jobs/${jobId}/logs`, { params })
+  return service.get<TestLogsResponse, TestLogsResponse>(`/v1/testing/jobs/${jobId}/logs`, {
+    params,
+  })
 }
 
 /**
@@ -113,6 +127,7 @@ export const exportTestResults = async (
 export const connectTestWebSocket = (jobId: number): WebSocket => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = import.meta.env.VITE_API_BASE_URL?.replace(/^https?:\/\//, '') || 'localhost:8000'
-  const wsUrl = `${protocol}//${host}/api/v1/testing/ws/jobs/${jobId}`
+  const token = localStorage.getItem('token')
+  const wsUrl = `${protocol}//${host}/api/v1/testing/ws/jobs/${jobId}?token=${token}`
   return new WebSocket(wsUrl)
 }

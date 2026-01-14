@@ -6,7 +6,7 @@ import type { AlgorithmListResponse, ModelVersion, ModelVersionDetail } from './
  * @returns 算法列表
  */
 export const getAlgorithms = (): Promise<AlgorithmListResponse> => {
-  return service.get<any, AlgorithmListResponse>('/v1/models/algorithms')
+  return service.get<AlgorithmListResponse, AlgorithmListResponse>('/v1/models/algorithms')
 }
 
 /**
@@ -19,7 +19,7 @@ export const getModelVersions = (params?: {
   limit?: number
   offset?: number
 }): Promise<ModelVersion[]> => {
-  return service.get<any, ModelVersion[]>('/v1/models/versions', { params })
+  return service.get<ModelVersion[], ModelVersion[]>('/v1/models/versions', { params })
 }
 
 /**
@@ -28,7 +28,7 @@ export const getModelVersions = (params?: {
  * @returns 模型版本详情
  */
 export const getModelVersion = (versionId: number): Promise<ModelVersionDetail> => {
-  return service.get<any, ModelVersionDetail>(`/v1/models/versions/${versionId}`)
+  return service.get<ModelVersionDetail, ModelVersionDetail>(`/v1/models/versions/${versionId}`)
 }
 
 /**
@@ -45,5 +45,5 @@ export const downloadModelCheckpoint = (versionId: number): string => {
  * @param versionId 模型版本ID
  */
 export const deleteModelVersion = (versionId: number): Promise<void> => {
-  return service.delete<any, void>(`/v1/models/versions/${versionId}`)
+  return service.delete<void, void>(`/v1/models/versions/${versionId}`)
 }
