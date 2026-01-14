@@ -469,7 +469,7 @@ const showDetail = async (jobId: number) => {
 
     // 设置默认选中第一个算法
     if (res.runs && res.runs.length > 0) {
-      selectedRunId.value = res.runs[0].id
+      selectedRunId.value = res.runs[0]?.id ?? null
     }
 
     // If job is running, ensure WS is connected
