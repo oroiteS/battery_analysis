@@ -6,6 +6,7 @@
 数据结构：所有电池的循环数据平铺存储，通过 Num_Cycles_Flt 识别每个电池的循环数
 """
 
+import argparse
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,8 +20,6 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.models import SessionLocal, Dataset, CycleData, BatteryUnit, Base, engine  # noqa: E402
-
-
 
 
 def load_mat_file(file_path: str):
@@ -38,8 +37,13 @@ def load_mat_file(file_path: str):
             return data
 
 
-def import_dataset():
-    """导入内置数据集"""
+def import_dataset(auto_mode: bool = False):
+    """
+    导入内置数据集
+    
+    Args:
+        auto_mode: 如果为True，则在数据已存在时自动跳过，不进行交互询问
+    """
 
     # 确保表存在
     print("正在检查并创建数据库表...")
@@ -52,33 +56,6 @@ def import_dataset():
         print(f"错误: 数据文件不存在: {mat_file}")
         return False
 
-    print(f"开始加载数据文件: {mat_file}")
-    data = load_mat_file(str(mat_file))
-
-    # 提取数据（所有电池的数据平铺在一起）
-    features = data["Features_mov_Flt"]  # shape: (total_cycles, 8)
-    rul = data["RUL_Flt"].flatten()  # shape: (total_cycles,)
-    pcl = data["PCL_Flt"].flatten()  # shape: (total_cycles,)
-    cycles = data["Cycles_Flt"].flatten()  # shape: (total_cycles,)
-    num_cycles_per_battery = data["Num_Cycles_Flt"].flatten()  # shape: (num_batteries,)
-
-    # 训练/测试索引（1-based索引，需要转换为0-based）
-    train_ind = data.get("train_ind", np.array([[]])).flatten() - 1
-    test_ind = data.get("test_ind", np.array([[]])).flatten() - 1
-
-    print("数据维度:")
-    print(f"  Features: {features.shape}")
-    print(f"  RUL: {rul.shape}")
-    print(f"  PCL: {pcl.shape}")
-    print(f"  Cycles: {cycles.shape}")
-    print(f"  Num_Cycles_Flt: {num_cycles_per_battery.shape}")
-
-    # 获取电池数量
-    num_batteries = len(num_cycles_per_battery)
-    total_cycles_count = features.shape[0]
-    print(f"\n总共 {num_batteries} 个电池单元")
-    print(f"总循环记录数: {total_cycles_count}")
-
     # 创建数据库会话
     db = SessionLocal()
 
@@ -89,11 +66,16 @@ def import_dataset():
         )
 
         if existing_dataset:
-            print(f"\n警告: 内置数据集已存在 (ID: {existing_dataset.id})")
+            print(f"\n内置数据集已存在 (ID: {existing_dataset.id})")
+            
+            if auto_mode:
+                print("自动模式：检测到数据已存在，跳过导入。")
+                return True
+            
             response = input("是否删除现有数据并重新导入? (y/N): ")
             if response.lower() != "y":
                 print("取消导入")
-                return False
+                return True  # 返回True表示状态符合预期（数据存在）
 
             # 删除现有数据集
             print("删除现有数据集...")
@@ -105,6 +87,33 @@ def import_dataset():
             ).delete()
             db.delete(existing_dataset)
             db.commit()
+
+        print(f"开始加载数据文件: {mat_file}")
+        data = load_mat_file(str(mat_file))
+
+        # 提取数据（所有电池的数据平铺在一起）
+        features = data["Features_mov_Flt"]  # shape: (total_cycles, 8)
+        rul = data["RUL_Flt"].flatten()  # shape: (total_cycles,)
+        pcl = data["PCL_Flt"].flatten()  # shape: (total_cycles,)
+        cycles = data["Cycles_Flt"].flatten()  # shape: (total_cycles,)
+        num_cycles_per_battery = data["Num_Cycles_Flt"].flatten()  # shape: (num_batteries,)
+
+        # 训练/测试索引（1-based索引，需要转换为0-based）
+        train_ind = data.get("train_ind", np.array([[]])).flatten() - 1
+        test_ind = data.get("test_ind", np.array([[]])).flatten() - 1
+
+        print("数据维度:")
+        print(f"  Features: {features.shape}")
+        print(f"  RUL: {rul.shape}")
+        print(f"  PCL: {pcl.shape}")
+        print(f"  Cycles: {cycles.shape}")
+        print(f"  Num_Cycles_Flt: {num_cycles_per_battery.shape}")
+
+        # 获取电池数量
+        num_batteries = len(num_cycles_per_battery)
+        total_cycles_count = features.shape[0]
+        print(f"\n总共 {num_batteries} 个电池单元")
+        print(f"总循环记录数: {total_cycles_count}")
 
         # 创建内置数据集
         print("\n创建内置数据集记录...")
@@ -230,14 +239,18 @@ def import_dataset():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Severson 电池数据集导入工具")
+    parser.add_argument("--auto", action="store_true", help="自动模式：如果数据已存在则跳过，不询问")
+    args = parser.parse_args()
+
     print("=" * 60)
     print("Severson 电池数据集导入工具")
     print("=" * 60)
 
-    success = import_dataset()
+    success = import_dataset(auto_mode=args.auto)
 
     if success:
-        print("\n数据导入完成！")
+        print("\n数据导入完成（或已存在）！")
         sys.exit(0)
     else:
         print("\n数据导入失败！")
