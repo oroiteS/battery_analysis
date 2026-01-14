@@ -8,8 +8,19 @@ const route = useRoute()
 const router = useRouter()
 const username = ref('Admin')
 const email = ref('')
+const isDark = ref(false)
 
 onMounted(async () => {
+  // Theme initialization
+  const savedTheme = localStorage.getItem('theme')
+  if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+    isDark.value = true
+    document.documentElement.classList.add('dark')
+  } else {
+    isDark.value = false
+    document.documentElement.classList.remove('dark')
+  }
+
   try {
     const user = await getMe()
     username.value = user.user_name
@@ -17,7 +28,7 @@ onMounted(async () => {
     // Sync to local storage
     localStorage.setItem('username', user.user_name)
     localStorage.setItem('email', user.email)
-  } catch (error) {
+  } catch {
     // Fallback to local storage if API fails
     const storedUser = localStorage.getItem('username')
     if (storedUser) {
@@ -29,6 +40,17 @@ onMounted(async () => {
     }
   }
 })
+
+const toggleTheme = () => {
+  isDark.value = !isDark.value
+  if (isDark.value) {
+    document.documentElement.classList.add('dark')
+    localStorage.setItem('theme', 'dark')
+  } else {
+    document.documentElement.classList.remove('dark')
+    localStorage.setItem('theme', 'light')
+  }
+}
 
 const handleLogout = () => {
   ElMessageBox.confirm('确定要退出登录吗？', '提示', {
@@ -60,7 +82,7 @@ const handleLogout = () => {
     <el-aside width="260px">
       <div class="logo">
         <div class="logo-icon">
-          <el-icon :size="20" color="#FFFFFF"><Lightning /></el-icon>
+          <el-icon :size="20"><Lightning /></el-icon>
         </div>
         <span class="logo-text">BATTERY<span class="logo-highlight">AI</span></span>
       </div>
@@ -113,7 +135,19 @@ const handleLogout = () => {
       <el-header>
         <div class="header-content">
           <div class="page-title">{{ route.meta.title || 'Dashboard' }}</div>
-          <!-- Right side header actions if needed -->
+          <div class="header-actions">
+            <el-button
+              circle
+              text
+              @click="toggleTheme"
+              class="theme-toggle"
+            >
+              <el-icon :size="20" :color="isDark ? '#F59E0B' : '#606266'">
+                <Sunny v-if="isDark" />
+                <Moon v-else />
+              </el-icon>
+            </el-button>
+          </div>
         </div>
       </el-header>
 
@@ -158,6 +192,11 @@ const handleLogout = () => {
   display: flex;
   align-items: center;
   justify-content: center;
+  color: var(--color-bg-page);
+}
+
+.logo-icon .el-icon {
+  color: var(--color-bg-page);
 }
 
 .logo-text {
@@ -189,10 +228,15 @@ const handleLogout = () => {
 
 .el-header {
   height: 80px;
-  display: flex;
-  align-items: center;
   padding: 0 40px;
   background: transparent;
+}
+
+.header-content {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .page-title {
@@ -200,6 +244,16 @@ const handleLogout = () => {
   font-weight: 600;
   color: var(--color-text-main);
   letter-spacing: -0.02em;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.theme-toggle:hover {
+  background-color: rgba(0, 0, 0, 0.05);
 }
 
 .el-main {
@@ -219,7 +273,7 @@ const handleLogout = () => {
 
 .user-avatar {
   background: var(--color-primary);
-  color: white;
+  color: var(--color-bg-page);
   font-weight: 600;
   font-size: 14px;
 }

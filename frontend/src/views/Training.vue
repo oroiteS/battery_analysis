@@ -24,6 +24,7 @@ import type {
   TrainingJobResponse,
   TrainingJobDetailResponse,
   TrainingLog,
+  TrainingRunResponse,
 } from '../api/types'
 
 defineOptions({
@@ -95,7 +96,7 @@ watch(numLayersInput, (val) => {
     if (Array.isArray(parsed)) {
       form.num_layers = parsed
     }
-  } catch (e) {
+  } catch {
     // 忽略解析错误
   }
 })
@@ -106,7 +107,7 @@ watch(numNeuronsInput, (val) => {
     if (Array.isArray(parsed)) {
       form.num_neurons = parsed
     }
-  } catch (e) {
+  } catch {
     // 忽略解析错误
   }
 })
@@ -117,7 +118,7 @@ watch(lossWeightsInput, (val) => {
     if (Array.isArray(parsed)) {
       form.loss_weights = parsed
     }
-  } catch (e) {
+  } catch {
     // 忽略解析错误
   }
 })
@@ -197,6 +198,7 @@ const connectWebSocket = (jobId: number) => {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const handleDetailMessage = (message: any) => {
   switch (message.type) {
     case 'log':
@@ -231,9 +233,11 @@ const handleDetailMessage = (message: any) => {
           break
         }
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const option = chartInstance.value.getOption() as any
 
         // 检查该epoch是否已存在（避免重复添加）
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const existingEpoch = option.series[0]?.data?.find((point: any) => point[0] === data.epoch)
         if (existingEpoch) {
           // 数据已存在，跳过添加
@@ -345,7 +349,7 @@ const initData = async () => {
     if (runningJob) {
       connectWebSocket(runningJob.id)
     }
-  } catch (error: any) {
+  } catch (error) {
     console.error('Init failed:', error)
     ElMessage.error(error?.response?.data?.detail || '初始化失败')
   }
@@ -357,7 +361,7 @@ const handleDatasetChange = async () => {
     const res = await getBatteries(form.datasetId)
     batteries.value = res
     updateBatteryRoles()
-  } catch (error: any) {
+  } catch (error) {
     console.error('Fetch batteries failed:', error)
     ElMessage.error(error?.response?.data?.detail || '获取电池列表失败')
   }
@@ -452,7 +456,7 @@ const handleSubmit = async () => {
     activeTab.value = 'monitor'
 
     connectWebSocket(newJob.id)
-  } catch (error: any) {
+  } catch (error) {
     console.error('Create job failed:', error)
     ElMessage.error(error?.response?.data?.detail || '创建任务失败')
   } finally {
@@ -486,14 +490,14 @@ const showDetail = async (jobId: number) => {
 
     // Load historical logs for all runs
     await loadHistoricalLogs(jobId, res.runs)
-  } catch (error: any) {
+  } catch (error) {
     console.error('Get job detail failed:', error)
     ElMessage.error(error?.response?.data?.detail || '获取任务详情失败')
   }
 }
 
 // 加载历史指标数据
-const loadHistoricalMetrics = async (jobId: number, runs: any[]) => {
+const loadHistoricalMetrics = async (jobId: number, runs: TrainingRunResponse[]) => {
   if (!chartInstance.value || !selectedRunId.value) return
 
   // 仅加载选中算法的数据
@@ -505,15 +509,17 @@ const loadHistoricalMetrics = async (jobId: number, runs: any[]) => {
     const metrics = metricsRes.metrics
 
     if (metrics && metrics.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const option = chartInstance.value.getOption() as any
 
       // 清空旧数据
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       option.series.forEach((s: any) => {
         s.data = []
       })
 
       // 批量添加历史数据到图表
-      metrics.forEach((m: any) => {
+      metrics.forEach((m) => {
         const epoch = m.epoch + 1 // epoch从0开始，显示时+1
 
         // 添加基础损失
@@ -546,7 +552,7 @@ const loadHistoricalMetrics = async (jobId: number, runs: any[]) => {
 }
 
 // 加载历史日志数据
-const loadHistoricalLogs = async (jobId: number, runs: any[]) => {
+const loadHistoricalLogs = async (jobId: number, runs: TrainingRunResponse[]) => {
   // 按运行顺序加载日志（按创建时间排序）
   const sortedRuns = [...runs].sort((a, b) => {
     return (
@@ -561,7 +567,7 @@ const loadHistoricalLogs = async (jobId: number, runs: any[]) => {
 
       if (logsRes.logs && logsRes.logs.length > 0) {
         // 批量添加历史日志
-        logsRes.logs.forEach((log: any) => {
+        logsRes.logs.forEach((log) => {
           // 检查是否已存在（通过时间戳+消息去重）
           const logKey = `${log.timestamp}_${log.message}`
           const exists = logs.value.some((l) => `${l.timestamp}_${l.message}` === logKey)
@@ -608,10 +614,11 @@ const handleDelete = async (jobId: number) => {
       ws.value = null
       wsJobId.value = null
     }
-  } catch (error: any) {
+  } catch (err) {
     // If user clicks cancel, error will be 'cancel'
-    if (error !== 'cancel') {
-      console.error('Delete job failed:', error)
+    if (err !== 'cancel') {
+      console.error('Delete job failed:', err)
+      const error = err as { response?: { data?: { detail?: string } } }
       ElMessage.error(error?.response?.data?.detail || '删除失败')
     }
   }
@@ -637,7 +644,7 @@ const handleDownloadLogs = async () => {
     link.click()
     document.body.removeChild(link)
     window.URL.revokeObjectURL(url)
-  } catch (error) {
+  } catch {
     ElMessage.error('下载日志失败')
   }
 }
@@ -690,10 +697,11 @@ const initChart = () => {
       axisPointer: {
         type: 'cross',
       },
-      formatter: (params: any) => {
+      formatter: (arg: unknown) => {
+        const params = arg as { value: number[]; marker: string; seriesName: string }[]
         if (!params || params.length === 0) return ''
         let result = `Epoch ${params[0].value[0]}<br/>`
-        params.forEach((param: any) => {
+        params.forEach((param) => {
           if (param.value && param.value[1] !== undefined) {
             result += `${param.marker} ${param.seriesName}: ${param.value[1].toFixed(6)}<br/>`
           }
@@ -859,7 +867,7 @@ const formatLogTime = (timestamp: string) => {
     const seconds = String(date.getSeconds()).padStart(2, '0')
     const ms = String(date.getMilliseconds()).padStart(3, '0')
     return `${hours}:${minutes}:${seconds}.${ms}`
-  } catch (e) {
+  } catch {
     return timestamp
   }
 }

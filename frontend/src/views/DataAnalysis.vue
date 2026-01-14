@@ -123,7 +123,7 @@ const handleSearch = async () => {
         const binCount = 10
         const step = (max - min) / binCount
 
-        const bins = new Array(binCount).fill(0)
+        const bins = Array.from({ length: binCount }).fill(0)
         const categories: string[] = []
 
         for (let i = 0; i < binCount; i++) {

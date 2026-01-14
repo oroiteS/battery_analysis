@@ -116,15 +116,6 @@ const modelOptions = computed(() => {
     // 训练目标显示
     const targetStr = m.target
 
-    // 提取关键指标
-    const metrics = m.metrics
-    let metricsStr = ''
-    if (metrics.RMSPE !== undefined) {
-      metricsStr = `RMSPE: ${metrics.RMSPE.toFixed(2)}%`
-    } else if (metrics.val_loss !== undefined) {
-      metricsStr = `Loss: ${metrics.val_loss.toFixed(4)}`
-    }
-
     return {
       value: m.id,
       label: `${algoName} | ${dateStr} | ${targetStr}`,
@@ -1206,7 +1197,8 @@ watch(
 .log-container {
   margin-top: 15px;
   padding: 10px;
-  background: #f5f7fa;
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   max-height: 200px;
   overflow-y: auto;
@@ -1216,6 +1208,6 @@ watch(
 
 .log-line {
   padding: 2px 0;
-  color: #606266;
+  color: var(--color-text-secondary);
 }
 </style>
