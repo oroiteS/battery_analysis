@@ -125,6 +125,7 @@ const detailActiveTab = ref('overview')
 const logs = ref<TrainingLog[]>([])
 const chartInstance = ref<echarts.ECharts | null>(null)
 const chartRef = ref<HTMLElement | null>(null)
+const isLogScale = ref(true) // 默认开启对数坐标，避免Loss差异过大导致挤压
 
 // --- WebSocket ---
 const ws = ref<WebSocket | null>(null)
@@ -437,10 +438,7 @@ const showDetail = async (jobId: number) => {
     // const logRes = await getTrainingLogs(jobId, res.runs[0].id)
     // logs.value = logRes.logs
 
-    // Init Chart after dialog opens
-    nextTick(() => {
-      initChart()
-    })
+    // Chart initialization is now handled by @opened event of el-dialog
   } catch (error: any) {
     console.error('Get job detail failed:', error)
     ElMessage.error(error?.response?.data?.detail || '获取任务详情失败')
@@ -476,6 +474,50 @@ const handleDelete = async (jobId: number) => {
   }
 }
 
+const handleDownloadLogs = async () => {
+  if (!currentJob.value) return
+  
+  // 预留接口：等待后端实现日志文件传输
+  // const jobId = currentJob.value.job.id
+  ElMessage.info('日志下载功能已就绪，等待后端接口对接')
+  
+  // 实际代码逻辑示例 (待后端接口完成后取消注释):
+  /*
+  try {
+    const response = await downloadTrainingJobLogs(jobId)
+    const url = window.URL.createObjectURL(new Blob([response]))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `training_job_${jobId}.log`)
+    document.body.appendChild(link)
+    link.click()
+    window.URL.revokeObjectURL(url)
+  } catch (error) {
+    ElMessage.error('下载日志失败')
+  }
+  */
+}
+
+const handleDialogOpened = () => {
+  // Dialog 动画结束后初始化图表，确保容器尺寸正确
+  if (detailActiveTab.value === 'metrics') {
+    initChart()
+  }
+}
+
+const handleDialogClosed = () => {
+  // Dialog 关闭时销毁图表实例，防止持有无效的 DOM 引用
+  if (chartInstance.value) {
+    chartInstance.value.dispose()
+    chartInstance.value = null
+  }
+  window.removeEventListener('resize', resizeChart)
+}
+
+const resizeChart = () => {
+  chartInstance.value?.resize()
+}
+
 const initChart = () => {
   if (!chartRef.value) return
 
@@ -487,10 +529,18 @@ const initChart = () => {
   chartInstance.value = echarts.init(chartRef.value)
   chartInstance.value.setOption({
     title: {
-      text: 'Training Loss',
+      text: '训练损失曲线 (Training Loss)',
       left: 'center',
       textStyle: {
         fontSize: 16,
+        fontWeight: 'normal'
+      },
+    },
+    toolbox: {
+      feature: {
+        dataZoom: { yAxisIndex: 'none' },
+        restore: {},
+        saveAsImage: {}
       },
     },
     tooltip: {
@@ -521,24 +571,25 @@ const initChart = () => {
       },
     },
     grid: {
-      left: '10%',
-      right: '10%',
-      bottom: '15%',
-      top: '20%',
+      left: '3%',
+      right: '4%',
+      bottom: '10%',
+      top: '15%',
       containLabel: true,
     },
     xAxis: {
       type: 'value',
       name: 'Epoch',
       nameLocation: 'middle',
-      nameGap: 30,
+      nameGap: 25,
+      minInterval: 1,
     },
     yAxis: {
-      type: 'value',
+      type: isLogScale.value ? 'log' : 'value',
       name: 'Loss',
-      nameLocation: 'middle',
-      nameGap: 50,
+      nameLocation: 'end',
       scale: true,
+      min: isLogScale.value ? (value: { min: number }) => (value.min > 0 ? value.min * 0.9 : null) : null,
       axisLabel: {
         formatter: (value: number) => value.toExponential(2),
       },
@@ -607,10 +658,33 @@ const initChart = () => {
   })
 
   // 监听窗口大小变化
-  window.addEventListener('resize', () => {
-    chartInstance.value?.resize()
-  })
+  window.removeEventListener('resize', resizeChart)
+  window.addEventListener('resize', resizeChart)
 }
+
+watch(isLogScale, (newVal) => {
+  if (chartInstance.value) {
+    chartInstance.value.setOption({
+      yAxis: {
+        type: newVal ? 'log' : 'value',
+        min: newVal ? (value: { min: number }) => (value.min > 0 ? value.min * 0.9 : null) : null
+      }
+    })
+  }
+})
+
+// 监听Tab切换，确保图表正确resize
+watch(detailActiveTab, (newTab) => {
+  if (newTab === 'metrics') {
+    nextTick(() => {
+      if (!chartInstance.value) {
+        initChart()
+      } else {
+        chartInstance.value.resize()
+      }
+    })
+  }
+})
 
 const getStatusType = (status: string) => {
   switch (status) {
@@ -644,6 +718,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('resize', resizeChart)
   if (ws.value) {
     ws.value.close()
   }
@@ -989,6 +1064,8 @@ onUnmounted(() => {
       width="90%"
       destroy-on-close
       :close-on-click-modal="false"
+      @opened="handleDialogOpened"
+      @closed="handleDialogClosed"
     >
       <div v-if="currentJob" class="job-detail-container">
         <el-descriptions border :column="4" size="large">
@@ -1048,10 +1125,22 @@ onUnmounted(() => {
           </el-tab-pane>
 
           <el-tab-pane label="实时指标" name="metrics">
-            <div ref="chartRef" style="width: 100%; height: 600px"></div>
+            <div class="chart-controls">
+              <el-switch
+                v-model="isLogScale"
+                active-text="对数坐标 (Log Scale)"
+                inactive-text="线性坐标 (Linear)"
+              />
+            </div>
+            <div ref="chartRef" class="chart-container"></div>
           </el-tab-pane>
 
           <el-tab-pane label="日志" name="logs">
+            <div class="log-toolbar">
+              <el-button type="primary" link icon="Download" @click="handleDownloadLogs">
+                下载完整日志
+              </el-button>
+            </div>
             <div class="log-container">
               <div v-if="logs.length === 0" class="log-empty">
                 <el-empty description="暂无日志数据" :image-size="80" />
@@ -1107,6 +1196,20 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+.chart-controls {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 20px 0;
+}
+.chart-container {
+  width: 100%;
+  height: 600px;
+}
+.log-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding-bottom: 10px;
 }
 .log-container {
   height: 500px;
