@@ -10,6 +10,8 @@ import {
   getTrainingJob,
   deleteTrainingJob,
   getTrainingWebSocketUrl,
+  getTrainingMetrics,
+  getTrainingLogs,
 } from '../api/training'
 import type {
   Dataset,
@@ -190,22 +192,39 @@ const connectWebSocket = (jobId: number) => {
 const handleDetailMessage = (message: any) => {
   switch (message.type) {
     case 'log':
-      logs.value.push({
-        timestamp: message.data?.timestamp || new Date().toISOString(),
-        level: message.data?.level || 'INFO',
-        message: message.data?.message || message.message,
-      })
-      // Auto scroll to bottom
-      nextTick(() => {
-        const container = document.querySelector('.log-container')
-        if (container) container.scrollTop = container.scrollHeight
-      })
+      {
+        const newLog = {
+          timestamp: message.data?.timestamp || new Date().toISOString(),
+          level: message.data?.level || 'INFO',
+          message: message.data?.message || message.message,
+        }
+
+        // 检查是否已存在（通过时间戳+消息去重）
+        const logKey = `${newLog.timestamp}_${newLog.message}`
+        const exists = logs.value.some((l) => `${l.timestamp}_${l.message}` === logKey)
+
+        if (!exists) {
+          logs.value.push(newLog)
+          // Auto scroll to bottom
+          nextTick(() => {
+            const container = document.querySelector('.log-container')
+            if (container) container.scrollTop = container.scrollHeight
+          })
+        }
+      }
       break
     case 'epoch_progress':
       // Update chart with multiple loss metrics
       if (chartInstance.value && message.data) {
         const data = message.data
         const option = chartInstance.value.getOption() as any
+
+        // 检查该epoch是否已存在（避免重复添加）
+        const existingEpoch = option.series[0]?.data?.find((point: any) => point[0] === data.epoch)
+        if (existingEpoch) {
+          // 数据已存在，跳过添加
+          break
+        }
 
         // 基础损失（总是存在）
         if (data.train_loss !== undefined) {
@@ -434,14 +453,115 @@ const showDetail = async (jobId: number) => {
       connectWebSocket(jobId)
     }
 
+<<<<<<< Updated upstream
     // Fetch historical logs if needed (simplified here)
     // const logRes = await getTrainingLogs(jobId, res.runs[0].id)
     // logs.value = logRes.logs
 
     // Chart initialization is now handled by @opened event of el-dialog
+=======
+    // Init Chart after dialog opens
+    await nextTick()
+    initChart()
+
+    // Load historical metrics for all runs
+    await loadHistoricalMetrics(jobId, res.runs)
+
+    // Load historical logs for all runs
+    await loadHistoricalLogs(jobId, res.runs)
+>>>>>>> Stashed changes
   } catch (error: any) {
     console.error('Get job detail failed:', error)
     ElMessage.error(error?.response?.data?.detail || '获取任务详情失败')
+  }
+}
+
+// 加载历史指标数据
+const loadHistoricalMetrics = async (jobId: number, runs: any[]) => {
+  if (!chartInstance.value) return
+
+  for (const run of runs) {
+    try {
+      const metricsRes = await getTrainingMetrics(jobId, run.id)
+      const metrics = metricsRes.metrics
+
+      if (metrics && metrics.length > 0) {
+        const option = chartInstance.value.getOption() as any
+
+        // 批量添加历史数据到图表
+        metrics.forEach((m: any) => {
+          const epoch = m.epoch + 1 // epoch从0开始，显示时+1
+
+          // 添加基础损失
+          if (m.train_loss !== undefined && option.series[0]) {
+            option.series[0].data.push([epoch, m.train_loss])
+          }
+          if (m.val_loss !== undefined && option.series[1]) {
+            option.series[1].data.push([epoch, m.val_loss])
+          }
+
+          // 添加额外的损失分量（如果存在）
+          if (m.metrics) {
+            if (m.metrics.loss_U !== undefined && option.series[2]) {
+              option.series[2].data.push([epoch, m.metrics.loss_U])
+            }
+            if (m.metrics.loss_F !== undefined && option.series[3]) {
+              option.series[3].data.push([epoch, m.metrics.loss_F])
+            }
+            if (m.metrics.loss_F_t !== undefined && option.series[4]) {
+              option.series[4].data.push([epoch, m.metrics.loss_F_t])
+            }
+          }
+        })
+
+        chartInstance.value.setOption(option)
+      }
+    } catch (error) {
+      console.error(`Failed to load metrics for run ${run.id}:`, error)
+    }
+  }
+}
+
+// 加载历史日志数据
+const loadHistoricalLogs = async (jobId: number, runs: any[]) => {
+  // 按运行顺序加载日志（按创建时间排序）
+  const sortedRuns = [...runs].sort((a, b) => {
+    return (
+      new Date(a.started_at || a.created_at).getTime() -
+      new Date(b.started_at || b.created_at).getTime()
+    )
+  })
+
+  for (const run of sortedRuns) {
+    try {
+      const logsRes = await getTrainingLogs(jobId, run.id, { limit: 1000 })
+
+      if (logsRes.logs && logsRes.logs.length > 0) {
+        // 批量添加历史日志
+        logsRes.logs.forEach((log: any) => {
+          // 检查是否已存在（通过时间戳+消息去重）
+          const logKey = `${log.timestamp}_${log.message}`
+          const exists = logs.value.some((l) => `${l.timestamp}_${l.message}` === logKey)
+
+          if (!exists) {
+            logs.value.push({
+              timestamp: log.timestamp || new Date().toISOString(),
+              level: log.level || 'INFO',
+              message: log.message || '',
+            })
+          }
+        })
+
+        // 自动滚动到底部
+        await nextTick()
+        const container = document.querySelector('.log-container')
+        if (container) {
+          container.scrollTop = container.scrollHeight
+        }
+      }
+    } catch (error) {
+      console.error(`Failed to load logs for run ${run.id}:`, error)
+    }
   }
 }
 
