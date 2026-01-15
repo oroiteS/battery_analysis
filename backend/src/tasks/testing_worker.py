@@ -402,7 +402,7 @@ class TestingWorker:
         return model, config
 
     def _prepare_test_data(
-        self, battery_ids: list[int], config: dict
+        self, battery_ids: list[int], config: dict, model_target: str
     ) -> tuple[torch.Tensor, torch.Tensor, list[int], list[int]]:
         """准备测试数据"""
         if self.db is None:
@@ -410,6 +410,7 @@ class TestingWorker:
 
         seq_len = int(config.get("seq_len") or 1)
         inputs_dim = int(config.get("inputs_dim") or 8)
+
         all_features = []
         all_targets = []
         battery_indices = []
@@ -432,9 +433,10 @@ class TestingWorker:
                 features = np.array([_build_feature_row(c, inputs_dim) for c in window])
 
                 target_cycle = window[-1]
-                if self.job and str(self.job.target) == "RUL":
+                # 根据模型训练时的target选择正确的标签
+                if model_target == "RUL":
                     target = target_cycle.rul if target_cycle.rul is not None else 0
-                else:
+                else:  # PCL or BOTH
                     target = target_cycle.pcl if target_cycle.pcl is not None else 0.0
 
                 all_features.append(features)
@@ -487,65 +489,6 @@ class TestingWorker:
             self.db.add(prediction)
 
         self.db.commit()
-
-    def _save_rul_predictions_from_pcl(
-        self,
-        battery_indices: list[int],
-        cycle_nums: list[int],
-        y_pred: np.ndarray,
-    ) -> tuple[list[float], list[float]]:
-        """
-        保存RUL预测结果（从PCL模型输出转换）
-
-        注意：这是一个简化处理，因为当前模型只训练了PCL
-        实际应该使用专门训练RUL的模型
-
-        Returns:
-            tuple[list[float], list[float]]: (rul_true, rul_pred)
-        """
-        if self.db is None:
-            return [], []
-
-        rul_true_list = []
-        rul_pred_list = []
-
-        for battery_id, cycle_num, pred_val in zip(battery_indices, cycle_nums, y_pred):
-            # 从数据库读取真实RUL值
-            cycle_data = (
-                self.db.query(CycleData)
-                .filter(
-                    CycleData.battery_id == battery_id,
-                    CycleData.cycle_num == cycle_num,
-                )
-                .first()
-            )
-
-            if cycle_data and cycle_data.rul is not None:
-                # 使用PCL预测值作为RUL预测（这是简化处理）
-                # 实际应该: RUL = (1 - PCL) * total_cycles 或使用专门的RUL模型
-                rul_true = float(cast(float, cycle_data.rul))
-
-                # 简单转换：假设PCL和RUL有反向关系
-                # 这只是为了显示图表，实际应该使用专门的RUL模型
-                rul_pred = _to_float(pred_val)
-
-                prediction = TestJobPrediction(
-                    test_job_id=self.job_id,
-                    battery_id=battery_id,
-                    cycle_num=cycle_num,
-                    target="RUL",
-                    y_true=rul_true,
-                    y_pred=rul_pred,
-                )
-                self.db.add(prediction)
-
-                rul_true_list.append(rul_true)
-                rul_pred_list.append(rul_pred)
-
-        self.db.commit()
-        self._log("INFO", f"已保存 {len(rul_true_list)} 条RUL预测记录")
-
-        return rul_true_list, rul_pred_list
 
     def _calculate_and_save_metrics(
         self,
@@ -671,6 +614,16 @@ class TestingWorker:
 
             model, config = self._load_model(model_version)
 
+            # 使用模型版本中存储的训练目标（而非用户选择的target）
+            model_target = str(model_version.target)
+            if model_target == "BOTH":
+                self._log(
+                    "WARNING",
+                    "模型训练目标为 BOTH，当前仅支持单目标预测，已按 PCL 处理。",
+                )
+                model_target = "PCL"
+            self._log("INFO", f"模型训练目标: {model_target}")
+
             # 获取测试电池
             job_batteries = (
                 db.query(TestJobBattery)
@@ -696,7 +649,7 @@ class TestingWorker:
             )
 
             X, y, battery_indices, cycle_nums = self._prepare_test_data(
-                battery_ids, config
+                battery_ids, config, model_target
             )
             self._log("INFO", f"测试样本数: {len(X)}")
 
@@ -717,109 +670,40 @@ class TestingWorker:
             y_pred = self._run_inference(model, X)
             y_true = y.numpy()
 
-            # 保存预测结果和计算指标
-            target_value = str(self.job.target)
+            self._log("INFO", f"保存{model_target}预测结果...")
 
-            if target_value == "BOTH":
-                # 对于BOTH目标，需要分别处理RUL和PCL
-                # 注意：当前模型只训练了PCL，所以只保存PCL结果
-                # 如果需要RUL，需要使用专门训练RUL的模型
-                self._log("INFO", "保存PCL预测结果...")
-                self._push_ws_message(
-                    "progress",
-                    {
-                        "test_job_id": self.job_id,
-                        "progress": 0.7,
-                        "stage": "saving_predictions",
-                        "message": "保存PCL预测结果",
-                    },
-                )
-                self._save_predictions(
-                    battery_indices, cycle_nums, y_true, y_pred, "PCL"
-                )
-                self._push_ws_message(
-                    "progress",
-                    {
-                        "test_job_id": self.job_id,
-                        "progress": 0.8,
-                        "stage": "calculating_metrics",
-                        "message": "计算PCL评估指标",
-                    },
-                )
-                self._calculate_and_save_metrics(battery_indices, y_true, y_pred, "PCL")
+            # 推送进度: 70% - 保存结果
+            self._push_ws_message(
+                "progress",
+                {
+                    "test_job_id": self.job_id,
+                    "progress": 0.7,
+                    "stage": "saving_predictions",
+                    "message": f"保存{model_target}预测结果",
+                },
+            )
 
-                # 对于RUL，我们需要从数据库读取真实RUL值并使用相同的预测
-                # 这是一个简化处理，实际应该使用专门的RUL模型
-                self._log("INFO", "保存RUL预测结果（使用PCL模型的输出）...")
-                self._push_ws_message(
-                    "progress",
-                    {
-                        "test_job_id": self.job_id,
-                        "progress": 0.85,
-                        "stage": "saving_predictions",
-                        "message": "保存RUL预测结果",
-                    },
-                )
-                rul_true_list, rul_pred_list = self._save_rul_predictions_from_pcl(
-                    battery_indices, cycle_nums, y_pred
-                )
+            self._save_predictions(
+                battery_indices, cycle_nums, y_true, y_pred, model_target
+            )
 
-                # 计算并保存RUL指标
-                if len(rul_true_list) > 0:
-                    self._log("INFO", "计算RUL指标...")
-                    self._push_ws_message(
-                        "progress",
-                        {
-                            "test_job_id": self.job_id,
-                            "progress": 0.95,
-                            "stage": "calculating_metrics",
-                            "message": "计算RUL评估指标",
-                        },
-                    )
-                    rul_true_array = np.array(rul_true_list)
-                    rul_pred_array = np.array(rul_pred_list)
-                    # 使用实际保存的电池索引
-                    rul_battery_indices = battery_indices[: len(rul_true_list)]
-                    self._calculate_and_save_metrics(
-                        rul_battery_indices, rul_true_array, rul_pred_array, "RUL"
-                    )
-            else:
-                # 单一目标
-                target = target_value
-                self._log("INFO", f"保存{target}预测结果...")
+            # 计算并保存指标
+            self._log("INFO", "计算指标...")
 
-                # 推送进度: 70% - 保存结果
-                self._push_ws_message(
-                    "progress",
-                    {
-                        "test_job_id": self.job_id,
-                        "progress": 0.7,
-                        "stage": "saving_predictions",
-                        "message": "保存预测结果",
-                    },
-                )
+            # 推送进度: 90% - 计算指标
+            self._push_ws_message(
+                "progress",
+                {
+                    "test_job_id": self.job_id,
+                    "progress": 0.9,
+                    "stage": "calculating_metrics",
+                    "message": "计算评估指标",
+                },
+            )
 
-                self._save_predictions(
-                    battery_indices, cycle_nums, y_true, y_pred, target
-                )
-
-                # 计算并保存指标
-                self._log("INFO", "计算指标...")
-
-                # 推送进度: 90% - 计算指标
-                self._push_ws_message(
-                    "progress",
-                    {
-                        "test_job_id": self.job_id,
-                        "progress": 0.9,
-                        "stage": "calculating_metrics",
-                        "message": "计算评估指标",
-                    },
-                )
-
-                self._calculate_and_save_metrics(
-                    battery_indices, y_true, y_pred, target
-                )
+            self._calculate_and_save_metrics(
+                battery_indices, y_true, y_pred, model_target
+            )
 
             self._push_ws_message(
                 "progress",

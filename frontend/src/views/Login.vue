@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { User, Lock, Message, Lightning } from '@element-plus/icons-vue'
+import { User, Lock, Message, Lightning, Sunny, Moon } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { login, register, getMe } from '../api/auth'
 
@@ -12,6 +12,29 @@ defineOptions({
 const router = useRouter()
 const loginFormRef = ref()
 const registerFormRef = ref()
+
+// Theme logic
+const isDark = ref(false)
+
+onMounted(() => {
+  const savedTheme = localStorage.getItem('theme')
+  if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+    isDark.value = true
+  } else {
+    isDark.value = false
+  }
+})
+
+const toggleTheme = () => {
+  isDark.value = !isDark.value
+  if (isDark.value) {
+    document.documentElement.classList.add('dark')
+    localStorage.setItem('theme', 'dark')
+  } else {
+    document.documentElement.classList.remove('dark')
+    localStorage.setItem('theme', 'light')
+  }
+}
 
 // Toggle between Login and Register
 const isRegister = ref(false)
@@ -120,6 +143,21 @@ const toggleMode = () => {
 
 <template>
   <div class="login-container">
+    <!-- Theme Toggle Button -->
+    <div class="theme-toggle-wrapper">
+      <el-button
+        circle
+        text
+        @click="toggleTheme"
+        class="theme-toggle"
+      >
+        <el-icon :size="20" :color="isDark ? '#F59E0B' : '#606266'">
+          <Sunny v-if="isDark" />
+          <Moon v-else />
+        </el-icon>
+      </el-button>
+    </div>
+
     <div class="login-content">
       <div class="brand-section">
         <div class="logo-circle">
@@ -233,12 +271,20 @@ const toggleMode = () => {
   display: flex;
   justify-content: center;
   align-items: center;
-  background-color: #F3F4F6;
+  background-color: var(--color-bg-page);
+  position: relative;
+}
+
+.theme-toggle-wrapper {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 100;
 }
 
 .login-content {
   display: flex;
-  background: white;
+  background: var(--color-bg-surface);
   border-radius: 24px;
   overflow: hidden;
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 10px 10px -5px rgba(0, 0, 0, 0.01);
@@ -249,7 +295,7 @@ const toggleMode = () => {
 
 .brand-section {
   flex: 1;
-  background-color: var(--color-primary);
+  background-color: #111827; /* Always dark for brand section */
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -258,6 +304,11 @@ const toggleMode = () => {
   padding: 40px;
   position: relative;
   overflow: hidden;
+}
+
+/* In dark mode, ensure brand section separates from the form (which is also dark) */
+:deep(.dark) .brand-section {
+  border-right: 1px solid var(--color-border);
 }
 
 /* Abstract shapes for decoration */
@@ -317,6 +368,7 @@ const toggleMode = () => {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  background-color: var(--color-bg-surface);
 }
 
 .form-title {

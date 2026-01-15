@@ -30,6 +30,7 @@ class BaselineTrainingConfig:
     # 数据参数
     seq_len: int = 1
     perc_val: float = 0.2
+    target: str = "PCL"  # RUL/PCL/BOTH
 
     # 模型参数（来自预训练模型）
     num_layers: list[int] = field(default_factory=lambda: [2])
@@ -63,6 +64,7 @@ class BaselineTrainingConfig:
         return {
             "seq_len": self.seq_len,
             "perc_val": self.perc_val,
+            "target": self.target,
             "num_layers": self.num_layers,
             "num_neurons": self.num_neurons,
             "dropout_rate": self.dropout_rate,
@@ -166,9 +168,22 @@ class BaselineTrainer:
         inputs_val = inputs_dict["val"].to(self.device)
         inputs_test = inputs_dict["test"].to(self.device)
 
-        targets_train = targets_dict["train"][:, :, 0:1].to(self.device)  # PCL only
-        targets_val = targets_dict["val"][:, :, 0:1].to(self.device)
-        targets_test = targets_dict["test"][:, :, 0:1].to(self.device)
+        # 根据 target 选择正确的标签列
+        # targets shape: (N, seq_len, 2), 其中 [:, :, 0] 是 PCL, [:, :, 1] 是 RUL
+        if self.config.target == "RUL":
+            target_idx = 1
+        else:  # PCL or BOTH (BOTH时只训练PCL，测试时分别处理)
+            target_idx = 0
+
+        targets_train = targets_dict["train"][:, :, target_idx : target_idx + 1].to(
+            self.device
+        )
+        targets_val = targets_dict["val"][:, :, target_idx : target_idx + 1].to(
+            self.device
+        )
+        targets_test = targets_dict["test"][:, :, target_idx : target_idx + 1].to(
+            self.device
+        )
 
         self._log(
             "INFO",
@@ -176,14 +191,33 @@ class BaselineTrainer:
         )
 
         # 2. 超参数搜索
-        metric_mean, metric_std, best_model, best_results = self._hyperparameter_search(
-            inputs_train=inputs_train,
-            targets_train=targets_train,
-            inputs_val=inputs_val,
-            targets_val=targets_val,
-            inputs_test=inputs_test,
-            targets_test=targets_test,
+        metric_mean, metric_std, best_model, best_results, best_scalers = (
+            self._hyperparameter_search(
+                inputs_train=inputs_train,
+                targets_train=targets_train,
+                inputs_val=inputs_val,
+                targets_val=targets_val,
+                inputs_test=inputs_test,
+                targets_test=targets_test,
+            )
         )
+
+        scaler_payload = {}
+        if best_scalers:
+            mean_inputs, std_inputs = best_scalers["scaler_inputs"]
+            mean_targets, std_targets = best_scalers["scaler_targets"]
+            scaler_payload = {
+                "inputs_dim": int(best_scalers["inputs_dim"]),
+                "outputs_dim": int(best_scalers["outputs_dim"]),
+                "scaler_inputs": [
+                    mean_inputs.detach().cpu().tolist(),
+                    std_inputs.detach().cpu().tolist(),
+                ],
+                "scaler_targets": [
+                    mean_targets.detach().cpu().tolist(),
+                    std_targets.detach().cpu().tolist(),
+                ],
+            }
 
         # 3. 返回结果
         results = {
@@ -192,6 +226,7 @@ class BaselineTrainer:
             "metric_std": metric_std,
             "best_model_state": best_model.state_dict() if best_model else None,
             "best_results": best_results,
+            **scaler_payload,
         }
 
         if self.callbacks.on_training_end:
@@ -208,7 +243,7 @@ class BaselineTrainer:
         targets_val: torch.Tensor,
         inputs_test: torch.Tensor,
         targets_test: torch.Tensor,
-    ) -> tuple[dict, dict, Any, dict]:
+    ) -> tuple[dict, dict, Any, dict, dict[str, Any] | None]:
         """执行超参数搜索"""
         metric_mean = {
             "train": np.zeros(
@@ -235,6 +270,7 @@ class BaselineTrainer:
 
         best_model = None
         best_results = {}
+        best_scalers: dict[str, Any] | None = None
 
         for l_idx, num_l in enumerate(self.config.num_layers):
             for n_idx, num_n in enumerate(self.config.num_neurons):
@@ -257,7 +293,7 @@ class BaselineTrainer:
                 }
 
                 for round_idx in range(self.config.num_rounds):
-                    model, results_epoch = self._train_single_round(
+                    model, results_epoch, scalers = self._train_single_round(
                         inputs_train=inputs_train,
                         targets_train=targets_train,
                         inputs_val=inputs_val,
@@ -286,6 +322,7 @@ class BaselineTrainer:
                     if l_idx == 0 and n_idx == 0 and round_idx == 0:
                         best_model = model
                         best_results = metrics
+                        best_scalers = scalers
 
                 # 计算平均指标
                 metric_mean["train"][l_idx, n_idx] = np.mean(metric_rounds["train"])
@@ -310,7 +347,7 @@ class BaselineTrainer:
                         },
                     )
 
-        return metric_mean, metric_std, best_model, best_results
+        return metric_mean, metric_std, best_model, best_results, best_scalers
 
     def _train_single_round(
         self,
@@ -321,7 +358,7 @@ class BaselineTrainer:
         layers: list[int],
         round_idx: int = 0,
         num_rounds: int = 1,
-    ) -> tuple[Any, dict]:
+    ) -> tuple[Any, dict, dict[str, Any]]:
         """训练单轮"""
         inputs_dim = inputs_train.shape[2]
         outputs_dim = 1
@@ -418,7 +455,13 @@ class BaselineTrainer:
             on_epoch_end=epoch_callback,  # 传递回调
         )
 
-        return model, results_epoch
+        scalers = {
+            "inputs_dim": int(inputs_dim),
+            "outputs_dim": int(outputs_dim),
+            "scaler_inputs": (mean_inputs_train, std_inputs_train),
+            "scaler_targets": (mean_targets_train, std_targets_train),
+        }
+        return model, results_epoch, scalers
 
     def _evaluate_model(
         self,
@@ -442,16 +485,30 @@ class BaselineTrainer:
         ]:
             with torch.no_grad():
                 U_pred, _, _ = model(inputs=inputs)
-                U_pred_soh = 1.0 - U_pred
-                targets_soh = 1.0 - targets
+                if self.config.target == "RUL":
+                    pred_eval = U_pred
+                    targets_eval = targets
+                else:
+                    pred_eval = 1.0 - U_pred
+                    targets_eval = 1.0 - targets
 
                 # 计算指标
-                RMSPE = torch.sqrt(
-                    torch.mean(((U_pred_soh - targets_soh) / targets_soh) ** 2)
-                )
-                MSE = torch.mean((U_pred_soh - targets_soh) ** 2)
-                SS_res = torch.sum((U_pred_soh - targets_soh) ** 2)
-                SS_tot = torch.sum((targets_soh - torch.mean(targets_soh)) ** 2)
+                mask = targets_eval != 0
+                if torch.any(mask):
+                    RMSPE = torch.sqrt(
+                        torch.mean(
+                            (
+                                (pred_eval[mask] - targets_eval[mask])
+                                / targets_eval[mask]
+                            )
+                            ** 2
+                        )
+                    )
+                else:
+                    RMSPE = torch.tensor(float("inf"), device=targets_eval.device)
+                MSE = torch.mean((pred_eval - targets_eval) ** 2)
+                SS_res = torch.sum((pred_eval - targets_eval) ** 2)
+                SS_tot = torch.sum((targets_eval - torch.mean(targets_eval)) ** 2)
                 R2 = 1 - (SS_res / SS_tot)
 
                 results[split_name] = {

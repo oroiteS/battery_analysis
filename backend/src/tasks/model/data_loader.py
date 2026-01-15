@@ -206,7 +206,7 @@ class DatabaseBatteryLoader:
         targets_dict = {
             "train": torch.tensor(targets_train_final, dtype=torch.float32),
             "val": torch.tensor(targets_val, dtype=torch.float32),
-            "test": torch.tensor(inputs_test, dtype=torch.float32), # 修正：这里应该是 targets_test
+            "test": torch.tensor(targets_test, dtype=torch.float32),
         }
 
         return inputs_dict, targets_dict

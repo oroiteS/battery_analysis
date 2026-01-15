@@ -65,6 +65,7 @@ class BiLSTMTrainingConfig:
     # 数据参数
     seq_len: int = 1
     perc_val: float = 0.2
+    target: str = "PCL"  # RUL/PCL/BOTH
 
     # 模型参数（来自预训练模型）
     num_layers: int = 2  # BiLSTM 使用单个整数而非列表
@@ -98,6 +99,7 @@ class BiLSTMTrainingConfig:
         return {
             "seq_len": self.seq_len,
             "perc_val": self.perc_val,
+            "target": self.target,
             "num_layers": self.num_layers,
             "hidden_dim": self.hidden_dim,
             "dropout_rate": self.dropout_rate,
@@ -173,9 +175,16 @@ def train_bilstm_from_database(
     inputs_val = inputs_dict["val"].to(device)
     inputs_test = inputs_dict["test"].to(device)
 
-    targets_train = targets_dict["train"][:, :, 0:1].to(device)
-    targets_val = targets_dict["val"][:, :, 0:1].to(device)
-    targets_test = targets_dict["test"][:, :, 0:1].to(device)
+    # 根据 target 选择正确的标签列
+    # targets shape: (N, seq_len, 2), 其中 [:, :, 0] 是 PCL, [:, :, 1] 是 RUL
+    if config.target == "RUL":
+        target_idx = 1
+    else:  # PCL or BOTH (BOTH时只训练PCL，测试时分别处理)
+        target_idx = 0
+
+    targets_train = targets_dict["train"][:, :, target_idx : target_idx + 1].to(device)
+    targets_val = targets_dict["val"][:, :, target_idx : target_idx + 1].to(device)
+    targets_test = targets_dict["test"][:, :, target_idx : target_idx + 1].to(device)
 
     _log(
         "INFO",
@@ -263,11 +272,22 @@ def train_bilstm_from_database(
             # 计算监控指标
             current_val_metric: float
             if config.monitor_metric == "RMSPE":
-                val_pred_soh = 1.0 - val_output
-                val_true_soh = 1.0 - targets_val
-                val_rmspe = torch.sqrt(
-                    torch.mean(((val_pred_soh - val_true_soh) / val_true_soh) ** 2)
-                ).item()
+                if config.target == "RUL":
+                    val_pred = val_output
+                    val_true = targets_val
+                else:
+                    val_pred = 1.0 - val_output
+                    val_true = 1.0 - targets_val
+
+                mask = val_true != 0
+                if torch.any(mask):
+                    val_rmspe = torch.sqrt(
+                        torch.mean(
+                            ((val_pred[mask] - val_true[mask]) / val_true[mask]) ** 2
+                        )
+                    ).item()
+                else:
+                    val_rmspe = float("inf")
                 current_val_metric = val_rmspe
             else:
                 current_val_metric = val_loss
@@ -316,16 +336,27 @@ def train_bilstm_from_database(
     def eval_metrics(x: torch.Tensor, y: torch.Tensor) -> dict[str, float]:
         with torch.no_grad():
             pred = model(x)
-            pred_soh = 1.0 - pred
-            y_soh = 1.0 - y
+            if config.target == "RUL":
+                pred_eval = pred
+                y_eval = y
+            else:
+                pred_eval = 1.0 - pred
+                y_eval = 1.0 - y
 
-            mae = torch.mean(torch.abs(pred_soh - y_soh)).item()
-            mse = torch.mean((pred_soh - y_soh) ** 2).item()
-            sse = torch.sum((pred_soh - y_soh) ** 2).item()
-            rmspe = torch.sqrt(torch.mean(((pred_soh - y_soh) / y_soh) ** 2)).item()
+            mae = torch.mean(torch.abs(pred_eval - y_eval)).item()
+            mse = torch.mean((pred_eval - y_eval) ** 2).item()
+            sse = torch.sum((pred_eval - y_eval) ** 2).item()
 
-            ss_res = torch.sum((y_soh - pred_soh) ** 2)
-            ss_tot = torch.sum((y_soh - torch.mean(y_soh)) ** 2)
+            mask = y_eval != 0
+            if torch.any(mask):
+                rmspe = torch.sqrt(
+                    torch.mean(((pred_eval[mask] - y_eval[mask]) / y_eval[mask]) ** 2)
+                ).item()
+            else:
+                rmspe = float("inf")
+
+            ss_res = torch.sum((y_eval - pred_eval) ** 2)
+            ss_tot = torch.sum((y_eval - torch.mean(y_eval)) ** 2)
             r2 = (1 - ss_res / ss_tot).item()
 
             return {"MAE": mae, "MSE": mse, "SSE": sse, "RMSPE": rmspe, "R2": r2}
