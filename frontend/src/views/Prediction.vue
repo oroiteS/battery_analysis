@@ -1255,6 +1255,9 @@ watch(
               <el-col :span="12">
                 <el-form-item label="预测步长">
                   <el-input-number v-model="testForm.horizon" :min="1" :max="100" :step="1" />
+                  <el-text type="info" size="small" style="margin-left: 10px">
+                    预测未来第 N 个周期的值（如 horizon=5 表示预测未来第5个周期）
+                  </el-text>
                 </el-form-item>
               </el-col>
             </el-row>

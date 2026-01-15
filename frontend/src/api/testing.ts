@@ -105,6 +105,7 @@ export const exportTestResults = async (
   const response = await service.post(`/v1/testing/jobs/${jobId}/export`, null, {
     params: { format },
     responseType: 'blob',
+    timeout: 120000, // 120秒超时，适用于大数据量导出
   })
 
   // 创建下载链接

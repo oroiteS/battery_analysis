@@ -404,12 +404,33 @@ class TestingWorker:
     def _prepare_test_data(
         self, battery_ids: list[int], config: dict, model_target: str
     ) -> tuple[torch.Tensor, torch.Tensor, list[int], list[int]]:
-        """准备测试数据"""
+        """准备测试数据（支持多步预测）
+
+        Args:
+            battery_ids: 待测试的电池ID列表
+            config: 模型配置
+            model_target: 模型训练目标 (RUL/PCL)
+
+        Returns:
+            X: 输入特征 [N, seq_len, inputs_dim]
+            y: 真实标签 [N]
+            battery_indices: 每个样本对应的电池ID
+            cycle_nums: 每个样本对应的预测目标周期号
+        """
         if self.db is None:
             raise RuntimeError("数据库连接未初始化")
+        if self.job is None:
+            raise RuntimeError("任务对象未初始化")
 
         seq_len = int(config.get("seq_len") or 1)
         inputs_dim = int(config.get("inputs_dim") or 8)
+        horizon_value = cast(int, self.job.horizon)
+        horizon = int(horizon_value)  # 预测步长
+
+        self._log(
+            "INFO",
+            f"数据准备参数: seq_len={seq_len}, horizon={horizon}, inputs_dim={inputs_dim}",
+        )
 
         all_features = []
         all_targets = []
@@ -424,15 +445,24 @@ class TestingWorker:
                 .all()
             )
 
-            if len(cycles) < seq_len:
-                self._log("WARNING", f"电池 {battery_id} 数据不足，跳过")
+            # 需要至少 seq_len + horizon 个周期才能进行预测
+            min_cycles = seq_len + horizon - 1
+            if len(cycles) < min_cycles:
+                self._log(
+                    "WARNING",
+                    f"电池 {battery_id} 数据不足 (需要>={min_cycles}个周期，实际{len(cycles)}个)，跳过",
+                )
                 continue
 
-            for i in range(len(cycles) - seq_len + 1):
+            # 滑动窗口：使用 [i, i+seq_len) 的数据预测第 i+seq_len+horizon-1 周期的值
+            for i in range(len(cycles) - seq_len - horizon + 1):
+                # 输入窗口：前 seq_len 个周期
                 window = cycles[i : i + seq_len]
                 features = np.array([_build_feature_row(c, inputs_dim) for c in window])
 
-                target_cycle = window[-1]
+                # 预测目标：未来第 horizon 个周期
+                target_cycle = cycles[i + seq_len + horizon - 1]
+
                 # 根据模型训练时的target选择正确的标签
                 if model_target == "RUL":
                     target = target_cycle.rul if target_cycle.rul is not None else 0
@@ -452,6 +482,8 @@ class TestingWorker:
 
         X = torch.FloatTensor(np.array(all_features))
         y = torch.FloatTensor(all_targets)
+
+        self._log("INFO", f"生成测试样本: {len(X)} 个 (来自 {len(battery_ids)} 个电池)")
 
         return X, y, battery_indices, cycle_nums
 

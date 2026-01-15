@@ -49,6 +49,7 @@ export const exportAnalysisReport = async (
   const response = await service.get('/v1/data/batteries/export', {
     params: { dataset_id: datasetId, battery_id: batteryId, format },
     responseType: 'blob',
+    timeout: 120000, // 120秒超时，适用于大数据量导出
   })
 
   // 创建下载链接
