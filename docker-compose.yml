@@ -1,0 +1,54 @@
+services:
+  # 数据库服务
+  db:
+    image: mysql:8.0
+    container_name: battery_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: battery_db
+    volumes:
+      - db_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 后端服务
+  backend:
+    build: ./backend
+    container_name: battery_backend
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_NAME: battery_db
+      UPLOAD_PATH: storage/uploads
+      MODEL_STORAGE_PATH: storage/models
+      # 设置一个足够长的 SECRET_KEY (至少32字符)
+      SECRET_KEY: "super_secret_key_for_battery_analysis_platform_2026"
+    volumes:
+      - ./backend/storage:/app/storage
+    ports:
+      - "8000:8000"
+
+  # 前端服务
+  frontend:
+    build: ./frontend
+    container_name: battery_frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  db_data:

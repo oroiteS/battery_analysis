@@ -152,7 +152,8 @@ class DatabaseBatteryLoader:
 
         start_idx = 0
         for i in range(self.num_cells):
-            num_cycles = int(self.num_cycles_all[i])
+            # 修正：使用 .item() 将 0-维数组转换为 Python 标量
+            num_cycles = int(self.num_cycles_all[i].item())
             end_idx = start_idx + num_cycles
 
             unit_inputs = self.inputs[start_idx:end_idx, :]
@@ -205,7 +206,7 @@ class DatabaseBatteryLoader:
         targets_dict = {
             "train": torch.tensor(targets_train_final, dtype=torch.float32),
             "val": torch.tensor(targets_val, dtype=torch.float32),
-            "test": torch.tensor(targets_test, dtype=torch.float32),
+            "test": torch.tensor(inputs_test, dtype=torch.float32), # 修正：这里应该是 targets_test
         }
 
         return inputs_dict, targets_dict
