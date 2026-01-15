@@ -26,7 +26,7 @@ const updateChart = () => {
     title: { text: props.title, left: 'center' },
     tooltip: { 
       trigger: 'item',
-      formatter: (params: any) => `${props.xAxisName}: ${params.data[0]}<br/>${props.yAxisName}: ${params.data[1]}`
+      formatter: (params: { data: number[] }) => `${props.xAxisName}: ${params.data[0]}<br/>${props.yAxisName}: ${params.data[1]}`
     },
     grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
     xAxis: { type: 'value', name: props.xAxisName, scale: true },

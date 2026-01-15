@@ -24,14 +24,12 @@ tags:
     description: 数据集和电池数据管理
   - name: Analysis
     description: 数据可视化分析
-  - name: Training
+  - name: Training Platform
     description: 训练平台
-  - name: Models
+  - name: Model Versions
     description: 模型版本管理
-  - name: Testing
+  - name: Testing Platform
     description: 测试平台
-  - name: WebSocket
-    description: WebSocket实时推送
 
 paths:
   # ==========================================
@@ -130,8 +128,6 @@ paths:
     post:
       tags: [Authentication]
       summary: 用户登出
-      security:
-        - BearerAuth: []
       responses:
         "200":
           description: 登出成功
@@ -263,6 +259,41 @@ paths:
   # ==========================================
   # Analysis
   # ==========================================
+  /data/batteries/export:
+    get:
+      tags: [Analysis]
+      summary: 导出数据分析报告
+      description: 支持PDF和XLSX格式（PDF暂未实现）
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: dataset_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: battery_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [PDF, XLSX]
+            default: PDF
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        "501":
+          description: PDF导出功能尚未实现
+
   /data/batteries/{battery_id}/stats:
     get:
       tags: [Analysis]
@@ -453,7 +484,7 @@ paths:
   # ==========================================
   /training/jobs:
     post:
-      tags: [Training]
+      tags: [Training Platform]
       summary: 创建训练任务
       security:
         - BearerAuth: []
@@ -563,10 +594,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TrainingJobResponse'
+                $ref: "#/components/schemas/TrainingJobResponse"
 
     get:
-      tags: [Training]
+      tags: [Training Platform]
       summary: 列出训练任务
       security:
         - BearerAuth: []
@@ -593,11 +624,11 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/TrainingJobResponse'
+                  $ref: "#/components/schemas/TrainingJobResponse"
 
   /training/jobs/{job_id}:
     get:
-      tags: [Training]
+      tags: [Training Platform]
       summary: 获取训练任务详情
       security:
         - BearerAuth: []
@@ -616,11 +647,11 @@ paths:
                 type: object
                 properties:
                   job:
-                    $ref: '#/components/schemas/TrainingJobResponse'
+                    $ref: "#/components/schemas/TrainingJobResponse"
                   runs:
                     type: array
                     items:
-                      $ref: '#/components/schemas/TrainingRunResponse'
+                      $ref: "#/components/schemas/TrainingRunResponse"
                   batteries:
                     type: array
                     items:
@@ -636,7 +667,7 @@ paths:
                           type: integer
 
     delete:
-      tags: [Training]
+      tags: [Training Platform]
       summary: 删除训练任务 (软删除)
       security:
         - BearerAuth: []
@@ -652,7 +683,7 @@ paths:
 
   /training/jobs/{job_id}/runs/{run_id}/metrics:
     get:
-      tags: [Training]
+      tags: [Training Platform]
       summary: 获取训练指标
       security:
         - BearerAuth: []
@@ -695,7 +726,7 @@ paths:
 
   /training/jobs/{job_id}/runs/{run_id}/logs:
     get:
-      tags: [Training]
+      tags: [Training Platform]
       summary: 获取训练日志 (从文件读取)
       security:
         - BearerAuth: []
@@ -750,12 +781,46 @@ paths:
                   message:
                     type: string
 
+  /training/jobs/{job_id}/runs/{run_id}/logs/download:
+    get:
+      tags: [Training Platform]
+      summary: 下载训练日志文件
+      description: 下载完整的训练日志文件供离线分析
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功返回日志文件
+          content:
+            text/plain:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: 'attachment; filename="training_job_{job_id}_{algorithm}_{timestamp}.log"'
+        "404":
+          description: 训练任务、运行记录或日志文件不存在
+
   # ==========================================
   # Models
   # ==========================================
   /models/versions:
     get:
-      tags: [Models]
+      tags: [Model Versions]
       summary: 列出模型版本
       security:
         - BearerAuth: []
@@ -782,11 +847,11 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/ModelVersionResponse'
+                  $ref: "#/components/schemas/ModelVersionResponse"
 
   /models/versions/{version_id}:
     get:
-      tags: [Models]
+      tags: [Model Versions]
       summary: 获取模型详情
       security:
         - BearerAuth: []
@@ -805,13 +870,13 @@ paths:
                 type: object
                 properties:
                   model:
-                    $ref: '#/components/schemas/ModelVersionResponse'
+                    $ref: "#/components/schemas/ModelVersionResponse"
                   training_info:
                     type: object
                     nullable: true
 
     delete:
-      tags: [Models]
+      tags: [Model Versions]
       summary: 删除模型版本 (软删除)
       security:
         - BearerAuth: []
@@ -827,7 +892,7 @@ paths:
 
   /models/versions/{version_id}/download:
     get:
-      tags: [Models]
+      tags: [Model Versions]
       summary: 下载模型checkpoint
       security:
         - BearerAuth: []
@@ -848,7 +913,7 @@ paths:
 
   /models/algorithms:
     get:
-      tags: [Models]
+      tags: [Model Versions]
       summary: 获取支持的算法列表
       security:
         - BearerAuth: []
@@ -879,7 +944,7 @@ paths:
   # ==========================================
   /testing/jobs:
     post:
-      tags: [Testing]
+      tags: [Testing Platform]
       summary: 创建测试任务
       security:
         - BearerAuth: []
@@ -911,10 +976,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TestJobResponse'
+                $ref: "#/components/schemas/TestJobResponse"
 
     get:
-      tags: [Testing]
+      tags: [Testing Platform]
       summary: 列出测试任务
       security:
         - BearerAuth: []
@@ -941,11 +1006,11 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/TestJobResponse'
+                  $ref: "#/components/schemas/TestJobResponse"
 
   /testing/jobs/{job_id}:
     get:
-      tags: [Testing]
+      tags: [Testing Platform]
       summary: 获取测试任务详情
       security:
         - BearerAuth: []
@@ -964,7 +1029,7 @@ paths:
                 type: object
                 properties:
                   job:
-                    $ref: '#/components/schemas/TestJobResponse'
+                    $ref: "#/components/schemas/TestJobResponse"
                   model_info:
                     type: object
                   batteries:
@@ -978,10 +1043,24 @@ paths:
                           type: string
                         total_cycles:
                           type: integer
+    delete:
+      tags: [Testing Platform]
+      summary: 删除测试任务 (软删除)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: 删除成功
 
   /testing/jobs/{job_id}/metrics:
     get:
-      tags: [Testing]
+      tags: [Testing Platform]
       summary: 获取测试指标
       security:
         - BearerAuth: []
@@ -1024,7 +1103,7 @@ paths:
 
   /testing/jobs/{job_id}/predictions:
     get:
-      tags: [Testing]
+      tags: [Testing Platform]
       summary: 获取预测结果
       security:
         - BearerAuth: []
@@ -1066,7 +1145,7 @@ paths:
 
   /testing/jobs/{job_id}/logs:
     get:
-      tags: [Testing]
+      tags: [Testing Platform]
       summary: 获取测试日志 (从文件读取)
       security:
         - BearerAuth: []
@@ -1118,7 +1197,7 @@ paths:
 
   /testing/jobs/{job_id}/export:
     post:
-      tags: [Testing]
+      tags: [Testing Platform]
       summary: 导出测试结果
       security:
         - BearerAuth: []
@@ -1136,25 +1215,23 @@ paths:
             default: CSV
       responses:
         "200":
-          description: 导出任务已创建
+          description: 导出成功
           content:
-            application/json:
+            text/csv:
               schema:
-                type: object
-                properties:
-                  export_id:
-                    type: integer
-                  status:
-                    type: string
-                  message:
-                    type: string
+                type: string
+                format: binary
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
 
   # ==========================================
   # WebSocket
   # ==========================================
   /training/ws/jobs/{job_id}:
     get:
-      tags: [WebSocket]
+      tags: [Training Platform]
       summary: 训练任务WebSocket
       description: |
         实时接收训练进度
@@ -1178,7 +1255,7 @@ paths:
 
   /testing/ws/jobs/{job_id}:
     get:
-      tags: [WebSocket]
+      tags: [Testing Platform]
       summary: 测试任务WebSocket
       description: |
         实时接收测试进度
@@ -1271,6 +1348,11 @@ components:
           type: integer
         algorithm:
           type: string
+          enum: [BASELINE, BILSTM, DEEPHPM]
+        target:
+          type: string
+          enum: [RUL, PCL]
+          description: 训练目标（从训练任务继承）
         name:
           type: string
         version:
@@ -1302,6 +1384,9 @@ components:
           type: integer
         status:
           type: string
+        model_name:
+          type: string
+          nullable: true
         created_at:
           type: string
           format: date-time

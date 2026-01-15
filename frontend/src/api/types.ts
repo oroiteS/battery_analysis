@@ -20,6 +20,14 @@ export interface UserResponse {
   email: string
 }
 
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue }
+
 // --- Analysis Types ---
 
 export interface FeatureStat {
@@ -115,7 +123,7 @@ export interface TrainingJobResponse {
   user_id: number
   dataset_id: number
   target: string
-  hyperparams: Record<string, any>
+  hyperparams: Record<string, JsonValue>
   status: string
   progress: number
   created_at: string
@@ -191,10 +199,11 @@ export interface ModelVersion {
   user_id: number
   run_id: number
   algorithm: string
+  target: string // 训练目标: RUL, PCL, 或 BOTH
   name: string
   version: string
-  config: Record<string, any>
-  metrics: Record<string, any>
+  config: Record<string, JsonValue>
+  metrics: Record<string, JsonValue>
   checkpoint_path: string
   created_at: string
 }
@@ -232,6 +241,7 @@ export interface TestJobResponse {
   created_at: string
   started_at: string | null
   finished_at: string | null
+  model_name?: string | null // 模型名称（算法 | 时间 | 目标）
 }
 
 export interface TestJobDetail {

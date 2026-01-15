@@ -468,10 +468,15 @@ class TrainingWorker:
             checkpoint_path,
         )
 
+        # 获取训练目标
+        job_target = cast(str | None, self.job.target)
+        target = job_target if job_target is not None else "PCL"
+
         model_version = ModelVersion(
             user_id=self.job.user_id,
             run_id=self.run_id,
             algorithm=algorithm,
+            target=target,  # 保存训练目标
             name=f"{algorithm}_Job{self.job_id}",
             version=version,
             config=config,
@@ -749,8 +754,12 @@ class TrainingWorker:
             round_idx: int,
             num_rounds: int,
         ) -> None:
-            self._save_epoch_metric(epoch, train_loss, val_loss, metrics)
-            self._update_run_status("RUNNING", current_epoch=epoch + 1)
+            # 计算全局epoch（考虑多个round）
+            global_epoch = round_idx * config.num_epoch + epoch
+            total_epochs = config.num_epoch * num_rounds
+
+            self._save_epoch_metric(global_epoch, train_loss, val_loss, metrics)
+            self._update_run_status("RUNNING", current_epoch=global_epoch + 1)
 
             # 每个 epoch 都输出日志，并包含轮次信息
             round_info = (
@@ -775,7 +784,7 @@ class TrainingWorker:
 
             self._log("INFO", ", ".join(log_parts))
 
-            # 推送到 WebSocket
+            # 推送到 WebSocket（使用全局epoch）
             ws_data = {
                 "run_id": self.run_id,
                 "algorithm": str(self.current_run.algorithm)
@@ -783,8 +792,8 @@ class TrainingWorker:
                 else "UNKNOWN",
                 "round": round_idx + 1,
                 "total_rounds": num_rounds,
-                "epoch": epoch + 1,
-                "total_epochs": config.num_epoch,
+                "epoch": global_epoch + 1,
+                "total_epochs": total_epochs,
                 "train_loss": train_loss,
                 "val_loss": val_loss,
             }
@@ -879,8 +888,12 @@ class TrainingWorker:
             round_idx: int,
             num_rounds: int,
         ) -> None:
-            self._save_epoch_metric(epoch, train_loss, val_loss, metrics)
-            self._update_run_status("RUNNING", current_epoch=epoch + 1)
+            # 计算全局epoch（考虑多个round）
+            global_epoch = round_idx * config.num_epoch + epoch
+            total_epochs = config.num_epoch * num_rounds
+
+            self._save_epoch_metric(global_epoch, train_loss, val_loss, metrics)
+            self._update_run_status("RUNNING", current_epoch=global_epoch + 1)
 
             # 每个 epoch 都输出日志，并包含轮次信息
             round_info = (
@@ -905,7 +918,7 @@ class TrainingWorker:
 
             self._log("INFO", ", ".join(log_parts))
 
-            # 推送到 WebSocket
+            # 推送到 WebSocket（使用全局epoch）
             ws_data = {
                 "run_id": self.run_id,
                 "algorithm": str(self.current_run.algorithm)
@@ -913,8 +926,8 @@ class TrainingWorker:
                 else "UNKNOWN",
                 "round": round_idx + 1,
                 "total_rounds": num_rounds,
-                "epoch": epoch + 1,
-                "total_epochs": config.num_epoch,
+                "epoch": global_epoch + 1,
+                "total_epochs": total_epochs,
                 "train_loss": train_loss,
                 "val_loss": val_loss,
             }
@@ -1032,8 +1045,12 @@ class TrainingWorker:
             round_idx: int,
             num_rounds: int,
         ) -> None:
-            self._save_epoch_metric(epoch, train_loss, val_loss, metrics)
-            self._update_run_status("RUNNING", current_epoch=epoch + 1)
+            # 计算全局epoch（考虑多个round）
+            global_epoch = round_idx * config.num_epoch + epoch
+            total_epochs = config.num_epoch * num_rounds
+
+            self._save_epoch_metric(global_epoch, train_loss, val_loss, metrics)
+            self._update_run_status("RUNNING", current_epoch=global_epoch + 1)
 
             # 每个 epoch 都输出日志，并包含轮次信息
             round_info = (
@@ -1058,7 +1075,7 @@ class TrainingWorker:
 
             self._log("INFO", ", ".join(log_parts))
 
-            # 推送到 WebSocket
+            # 推送到 WebSocket（使用全局epoch）
             ws_data = {
                 "run_id": self.run_id,
                 "algorithm": str(self.current_run.algorithm)
@@ -1066,8 +1083,8 @@ class TrainingWorker:
                 else "UNKNOWN",
                 "round": round_idx + 1,
                 "total_rounds": num_rounds,
-                "epoch": epoch + 1,
-                "total_epochs": config.num_epoch,
+                "epoch": global_epoch + 1,
+                "total_epochs": total_epochs,
                 "train_loss": train_loss,
                 "val_loss": val_loss,
             }

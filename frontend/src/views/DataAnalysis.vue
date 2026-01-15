@@ -123,7 +123,7 @@ const handleSearch = async () => {
         const binCount = 10
         const step = (max - min) / binCount
 
-        const bins = new Array(binCount).fill(0)
+        const bins = Array.from({ length: binCount }).fill(0)
         const categories: string[] = []
 
         for (let i = 0; i < binCount; i++) {
@@ -159,7 +159,7 @@ const handleSearch = async () => {
     }
   } catch (error) {
     console.error('Analysis failed:', error)
-    ElMessage.error('获取分析数据失败')
+    ElMessage.error('Failed to load analysis data')
   } finally {
     loading.value = false
   }
@@ -232,10 +232,10 @@ onMounted(() => {
 <template>
   <div class="analysis-container" v-loading="loading">
     <!-- 1. Top Header Controls -->
-    <el-card shadow="hover" class="header-card">
+    <el-card shadow="never" class="header-card">
       <div class="header-content">
         <div class="left-panel">
-          <span class="label">电池组编号：</span>
+          <span class="label">电池组</span>
           <el-select
             v-model="batteryId"
             placeholder="请选择电池组"
@@ -253,15 +253,15 @@ onMounted(() => {
         </div>
         <div class="right-panel">
           <el-button type="primary" icon="Download" @click="handleExportReport">
-            导出分析报告
+            导出报告
           </el-button>
         </div>
       </div>
     </el-card>
 
     <!-- 2. Statistical Overview Table -->
-    <el-card shadow="hover" class="mt-20" header="特征统计概览">
-      <el-table :data="tableData" border stripe style="width: 100%">
+    <el-card shadow="never" class="mt-20" header="统计概览">
+      <el-table :data="tableData" style="width: 100%">
         <el-table-column prop="name" label="特征名称" width="180" />
         <el-table-column prop="mean" label="均值 (Mean)" />
         <el-table-column prop="variance" label="方差 (Variance)" />
@@ -285,13 +285,13 @@ onMounted(() => {
     </el-card>
 
     <!-- 3. Visualization Dashboard -->
-    <el-row :gutter="20" class="mt-20">
+    <el-row :gutter="24" class="mt-20">
       <!-- Top-Left: Trend Analysis -->
       <el-col :span="12">
-        <el-card shadow="hover" class="chart-card">
+        <el-card shadow="never" class="chart-card">
           <template #header>
             <div class="card-header">
-              <span>特征趋势分析(各特征随循环次数的变化)</span>
+              <span>趋势分析</span>
               <el-select
                 v-model="selectedFeature"
                 size="small"
@@ -313,10 +313,10 @@ onMounted(() => {
 
       <!-- Top-Right: RUL Scatter -->
       <el-col :span="12">
-        <el-card shadow="hover" class="chart-card">
+        <el-card shadow="never" class="chart-card">
           <template #header>
             <div class="card-header">
-              <span>RUL 关键因子分析 (Top Feature vs RUL)</span>
+              <span>RUL 影响因子分析</span>
               <el-select
                 v-model="selectedRulFeature"
                 size="small"
@@ -341,17 +341,17 @@ onMounted(() => {
       </el-col>
     </el-row>
 
-    <el-row :gutter="20" class="mt-20">
+    <el-row :gutter="24" class="mt-20">
       <!-- Bottom-Left: PCL Distribution -->
       <el-col :span="12">
-        <el-card shadow="hover" class="chart-card" header="容量衰减分布 (PCL Distribution)">
+        <el-card shadow="never" class="chart-card" header="容量衰减分布 (PCL)">
           <HistogramChart :data="histData" :categories="histCategories" />
         </el-card>
       </el-col>
 
       <!-- Bottom-Right: Correlation Heatmap -->
       <el-col :span="12">
-        <el-card shadow="hover" class="chart-card" header="多特征相关性矩阵">
+        <el-card shadow="never" class="chart-card" header="相关性矩阵">
           <HeatmapChart :data="heatmapData" :x-labels="heatmapLabels" :y-labels="heatmapLabels" />
         </el-card>
       </el-col>
@@ -361,7 +361,7 @@ onMounted(() => {
 
 <style scoped>
 .mt-20 {
-  margin-top: 20px;
+  margin-top: 24px;
 }
 .header-content {
   display: flex;
@@ -369,9 +369,9 @@ onMounted(() => {
   align-items: center;
 }
 .label {
-  margin-right: 10px;
-  font-weight: bold;
-  color: #606266;
+  margin-right: 12px;
+  font-weight: 500;
+  color: var(--color-text-main);
 }
 .card-header {
   display: flex;
@@ -379,16 +379,15 @@ onMounted(() => {
   align-items: center;
 }
 .chart-card {
-  height: 420px; /* Fixed height for consistency */
+  height: 460px;
   display: flex;
   flex-direction: column;
 }
-/* Ensure chart components take available height */
 :deep(.el-card__body) {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 10px;
+  padding: 20px;
 }
 </style>

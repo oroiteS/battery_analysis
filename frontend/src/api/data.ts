@@ -6,7 +6,7 @@ import type { Dataset, BatteryUnit } from './types'
  * @returns 数据集列表
  */
 export const getDatasets = (): Promise<Dataset[]> => {
-  return service.get<any, Dataset[]>('/v1/data/datasets')
+  return service.get<Dataset[], Dataset[]>('/v1/data/datasets')
 }
 
 /**
@@ -15,5 +15,5 @@ export const getDatasets = (): Promise<Dataset[]> => {
  * @returns 电池列表
  */
 export const getBatteries = (datasetId: number): Promise<BatteryUnit[]> => {
-  return service.get<any, BatteryUnit[]>(`/v1/data/datasets/${datasetId}/batteries`)
+  return service.get<BatteryUnit[], BatteryUnit[]>(`/v1/data/datasets/${datasetId}/batteries`)
 }

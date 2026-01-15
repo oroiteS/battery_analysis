@@ -193,6 +193,7 @@ CREATE TABLE model_version (
   user_id BIGINT NOT NULL,
   run_id BIGINT NOT NULL COMMENT '关联的训练运行',
   algorithm ENUM('BASELINE','BILSTM','DEEPHPM') NOT NULL,
+  target ENUM('RUL','PCL') NOT NULL COMMENT '训练目标（从训练任务继承）',
   name VARCHAR(120) NOT NULL COMMENT '模型名称（用户自定义）',
   version VARCHAR(32) NOT NULL COMMENT '版本号（如：v1.0.0）',
   config JSON NULL COMMENT '模型配置（超参数、架构等）',
