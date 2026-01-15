@@ -474,7 +474,7 @@ const handleStartTest = async () => {
 
     if (testForm.value.target === 'BOTH') {
       const basePayload = {
-        dataset_id: testForm.value.datasetId,
+        dataset_id: testForm.value.datasetId!, // 使用非空断言，因为前面已经检查过了
         battery_ids: testForm.value.batteryIds,
         horizon: testForm.value.horizon,
       }
@@ -509,15 +509,16 @@ const handleStartTest = async () => {
       }
 
       if (createdTargets.length === 1) {
-        testForm.value.target = createdTargets[0]
+        testForm.value.target = createdTargets[0]! // 使用非空断言
         ElMessage.warning(`仅创建了 ${createdTargets[0]} 测试任务`)
       } else {
         ElMessage.success('测试任务已创建，正在执行...')
       }
 
       jobTargets.value = createdTargets
+      // 使用非空断言，因为 createdTargets[0] 肯定存在
       currentJobId.value =
-        createdTargets.length === 1 ? jobIdsByTarget.value[createdTargets[0]]! : null
+        createdTargets.length === 1 ? jobIdsByTarget.value[createdTargets[0]!]! : null
       let singleJob: TestJobResponse | null = null
       if (createdTargets.length === 1) {
         if (createdTargets[0] === 'RUL' && rulResult.status === 'fulfilled') {
@@ -538,8 +539,8 @@ const handleStartTest = async () => {
     } else {
       const target = testForm.value.target as 'RUL' | 'PCL'
       const job = await createTestJob({
-        model_version_id: testForm.value.modelVersionId,
-        dataset_id: testForm.value.datasetId,
+        model_version_id: testForm.value.modelVersionId!, // 使用非空断言
+        dataset_id: testForm.value.datasetId!, // 使用非空断言
         target,
         battery_ids: testForm.value.batteryIds,
         horizon: testForm.value.horizon,
@@ -708,7 +709,7 @@ const finalizeIfReady = async () => {
   isFinalizing.value = true
   try {
     if (jobTargets.value.length === 1) {
-      const target = jobTargets.value[0]
+      const target = jobTargets.value[0]! // 使用非空断言
       const jobId = jobIdsByTarget.value[target]
       if (jobId) {
         await finalizeSingle(jobId)
@@ -733,8 +734,10 @@ const finalizeSingle = async (jobId: number) => {
 
 const finalizeMultiple = async () => {
   const jobIds = jobTargets.value
-    .map((target) => jobIdsByTarget.value[target])
+    .filter((target) => jobIdsByTarget.value[target] !== undefined)
+    .map((target) => jobIdsByTarget.value[target]!)
     .filter((jobId): jobId is number => Number.isFinite(jobId))
+
   if (jobIds.length === 0) {
     isTesting.value = false
     return
