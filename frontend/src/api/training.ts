@@ -94,6 +94,7 @@ export const getTrainingLogs = (
 export const downloadTrainingJobLogs = (jobId: number, runId: number): Promise<Blob> => {
   return service.get<Blob, Blob>(`/v1/training/jobs/${jobId}/runs/${runId}/logs/download`, {
     responseType: 'blob',
+    timeout: 60000, // 60秒超时，适用于日志文件下载
   })
 }
 
