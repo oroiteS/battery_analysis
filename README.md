@@ -59,7 +59,7 @@ uv sync
 uv run python data/import_builtin_dataset.py
 
 # 启动 API 服务
-uv run uvicorn main:app --reload
+uv run main.py
 ```
 
 ### 3. 前端启动
@@ -75,15 +75,6 @@ pnpm dev
 - API Base: `http://localhost:8000/api/v1`
 - Web 前端: `http://localhost:5173`
 
----
-
-## 🧪 WebSocket 测试（可选）
-
-```bash
-cd backend/test
-npm install ws axios
-node test_websocket.js --base-url=http://localhost:8000
-```
 
 ---
 
@@ -108,7 +99,6 @@ node test_websocket.js --base-url=http://localhost:8000
 │   │   ├── config.py          # 配置与环境
 │   │   └── models.py          # 数据库模型
 │   ├── data/                  # 数据集与导入脚本
-│   ├── test/                  # WebSocket/API 测试脚本
 │   └── pyproject.toml         # 后端依赖
 │
 ├── frontend/                  # 前端工程
@@ -117,11 +107,6 @@ node test_websocket.js --base-url=http://localhost:8000
 │   │   └── components/        # 图表/组件
 │   ├── package.json           # 前端依赖
 │   └── vite.config.ts         # Vite 配置
-│
-├── power_soh/                 # 算法原型与预训练产物
-│   ├── *.py                   # 训练脚本
-│   ├── results/               # 预训练权重
-│   └── Settings/              # 预训练配置
 │
 ├── doc/                       # 项目文档与 OpenAPI
 │   ├── openapi.yaml
