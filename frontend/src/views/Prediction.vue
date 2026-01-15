@@ -53,6 +53,8 @@ const testForm = ref({
   datasetId: undefined as number | undefined,
   batteryIds: [] as number[],
   modelVersionId: undefined as number | undefined,
+  modelVersionIdRul: undefined as number | undefined,
+  modelVersionIdPcl: undefined as number | undefined,
   target: 'BOTH' as 'RUL' | 'PCL' | 'BOTH',
   horizon: 1,
 })
@@ -68,6 +70,11 @@ const currentJobId = ref<number | null>(null)
 const testJob = ref<TestJobResponse | null>(null)
 const testProgress = ref(0)
 const testLogs = ref<string[]>([])
+const jobTargets = ref<Array<'RUL' | 'PCL'>>([])
+const jobIdsByTarget = ref<Partial<Record<'RUL' | 'PCL', number>>>({})
+const jobProgressByTarget = ref<Record<'RUL' | 'PCL', number>>({ RUL: 0, PCL: 0 })
+const jobCompletion = ref<Record<'RUL' | 'PCL', boolean>>({ RUL: false, PCL: false })
+const isFinalizing = ref(false)
 
 // 结果数据
 const hasResult = ref(false)
@@ -75,7 +82,7 @@ const metrics = ref<TestMetrics | null>(null)
 const predictions = ref<TestPrediction[]>([])
 
 // WebSocket
-let ws: WebSocket | null = null
+let wsMap: Partial<Record<'RUL' | 'PCL', WebSocket>> = {}
 
 // ECharts实例
 const rulChartRef = ref<HTMLDivElement>()
@@ -92,35 +99,56 @@ const selectedBatteries = computed(() => {
   return batteries.value.filter((b) => testForm.value.batteryIds.includes(b.id))
 })
 
-const modelOptions = computed(() => {
-  return modelVersions.value.map((m) => {
-    // 格式化创建时间 - 转换为上海时区（UTC+8）
-    const date = new Date(m.created_at)
-    const dateStr = date.toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'Asia/Shanghai',
-    })
-
-    // 算法名称映射
-    const algoNames: Record<string, string> = {
-      BASELINE: 'Baseline',
-      BILSTM: 'BiLSTM',
-      DEEPHPM: 'DeepHPM',
-    }
-    const algoName = algoNames[m.algorithm] || m.algorithm
-
-    // 训练目标显示
-    const targetStr = m.target
-
-    return {
-      value: m.id,
-      label: `${algoName} | ${dateStr} | ${targetStr}`,
-    }
+const buildModelOption = (model: ModelVersion) => {
+  // 格式化创建时间 - 转换为上海时区（UTC+8）
+  const date = new Date(model.created_at)
+  const dateStr = date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Shanghai',
   })
+
+  // 算法名称映射
+  const algoNames: Record<string, string> = {
+    BASELINE: 'Baseline',
+    BILSTM: 'BiLSTM',
+    DEEPHPM: 'DeepHPM',
+  }
+  const algoName = algoNames[model.algorithm] || model.algorithm
+
+  // 训练目标显示
+  const targetStr = model.target === 'BOTH' ? 'PCL' : model.target
+
+  return {
+    value: model.id,
+    label: `${algoName} | ${dateStr} | ${targetStr}`,
+  }
+}
+
+const modelOptions = computed(() => {
+  return modelVersions.value.map((m) => buildModelOption(m))
+})
+
+const rulModelOptions = computed(() => {
+  return modelVersions.value.filter((m) => m.target === 'RUL').map(buildModelOption)
+})
+
+const pclModelOptions = computed(() => {
+  return modelVersions.value
+    .filter((m) => m.target === 'PCL' || m.target === 'BOTH')
+    .map(buildModelOption)
+})
+
+const selectedModelTarget = computed<'RUL' | 'PCL' | null>(() => {
+  const model = modelVersions.value.find((m) => m.id === testForm.value.modelVersionId)
+  const target = model?.target === 'BOTH' ? 'PCL' : model?.target
+  if (target === 'RUL' || target === 'PCL') {
+    return target
+  }
+  return null
 })
 
 // 加载数据集
@@ -377,6 +405,32 @@ const handleTabChange = (tabName: string | number) => {
   }
 }
 
+const resetJobTracking = () => {
+  jobTargets.value = []
+  jobIdsByTarget.value = {}
+  jobProgressByTarget.value = { RUL: 0, PCL: 0 }
+  jobCompletion.value = { RUL: false, PCL: false }
+  isFinalizing.value = false
+  currentJobId.value = null
+  testJob.value = null
+}
+
+const updateCombinedProgress = () => {
+  if (jobTargets.value.length === 0) {
+    testProgress.value = 0
+    return
+  }
+  const total = jobTargets.value.reduce((sum, target) => {
+    return sum + (jobProgressByTarget.value[target] ?? 0)
+  }, 0)
+  testProgress.value = Math.round(total / jobTargets.value.length)
+}
+
+const closeWebSockets = () => {
+  Object.values(wsMap).forEach((socket) => socket?.close())
+  wsMap = {}
+}
+
 // 开始测试
 const handleStartTest = async () => {
   if (!testForm.value.datasetId) {
@@ -387,12 +441,24 @@ const handleStartTest = async () => {
     ElMessage.warning('请至少选择一个电池')
     return
   }
-  if (!testForm.value.modelVersionId) {
+  if (testForm.value.target === 'BOTH') {
+    if (!testForm.value.modelVersionIdRul) {
+      ElMessage.warning('请选择 RUL 模型')
+      return
+    }
+    if (!testForm.value.modelVersionIdPcl) {
+      ElMessage.warning('请选择 PCL 模型')
+      return
+    }
+  } else if (!testForm.value.modelVersionId) {
     ElMessage.warning('请选择模型版本')
     return
   }
 
   try {
+    closeWebSockets()
+    resetJobTracking()
+
     if (rulChart) {
       rulChart.dispose()
       rulChart = null
@@ -406,25 +472,92 @@ const handleStartTest = async () => {
     testLogs.value = []
     testProgress.value = 0
 
-    // 创建测试任务
-    const job = await createTestJob({
-      model_version_id: testForm.value.modelVersionId,
-      dataset_id: testForm.value.datasetId,
-      target: testForm.value.target,
-      battery_ids: testForm.value.batteryIds,
-      horizon: testForm.value.horizon,
-    })
+    if (testForm.value.target === 'BOTH') {
+      const basePayload = {
+        dataset_id: testForm.value.datasetId,
+        battery_ids: testForm.value.batteryIds,
+        horizon: testForm.value.horizon,
+      }
 
-    currentJobId.value = job.id
-    testJob.value = job
+      const [rulResult, pclResult] = await Promise.allSettled([
+        createTestJob({
+          ...basePayload,
+          model_version_id: testForm.value.modelVersionIdRul!,
+          target: 'RUL',
+        }),
+        createTestJob({
+          ...basePayload,
+          model_version_id: testForm.value.modelVersionIdPcl!,
+          target: 'PCL',
+        }),
+      ])
 
-    ElMessage.success('测试任务已创建，正在执行...')
+      const createdTargets: Array<'RUL' | 'PCL'> = []
+      if (rulResult.status === 'fulfilled') {
+        createdTargets.push('RUL')
+        jobIdsByTarget.value.RUL = rulResult.value.id
+      }
+      if (pclResult.status === 'fulfilled') {
+        createdTargets.push('PCL')
+        jobIdsByTarget.value.PCL = pclResult.value.id
+      }
 
-    // 连接WebSocket接收实时进度
-    connectWebSocket(job.id)
+      if (createdTargets.length === 0) {
+        ElMessage.error('创建测试任务失败')
+        isTesting.value = false
+        return
+      }
 
-    // 轮询任务状态
-    pollJobStatus(job.id)
+      if (createdTargets.length === 1) {
+        testForm.value.target = createdTargets[0]
+        ElMessage.warning(`仅创建了 ${createdTargets[0]} 测试任务`)
+      } else {
+        ElMessage.success('测试任务已创建，正在执行...')
+      }
+
+      jobTargets.value = createdTargets
+      currentJobId.value =
+        createdTargets.length === 1 ? jobIdsByTarget.value[createdTargets[0]]! : null
+      let singleJob: TestJobResponse | null = null
+      if (createdTargets.length === 1) {
+        if (createdTargets[0] === 'RUL' && rulResult.status === 'fulfilled') {
+          singleJob = rulResult.value
+        } else if (createdTargets[0] === 'PCL' && pclResult.status === 'fulfilled') {
+          singleJob = pclResult.value
+        }
+      }
+      testJob.value = singleJob
+
+      createdTargets.forEach((target) => {
+        const jobId = jobIdsByTarget.value[target]
+        if (jobId) {
+          connectWebSocket(jobId, target)
+          pollJobStatus(jobId, target)
+        }
+      })
+    } else {
+      const target = testForm.value.target as 'RUL' | 'PCL'
+      const job = await createTestJob({
+        model_version_id: testForm.value.modelVersionId,
+        dataset_id: testForm.value.datasetId,
+        target,
+        battery_ids: testForm.value.batteryIds,
+        horizon: testForm.value.horizon,
+      })
+
+      jobTargets.value = [target]
+      jobIdsByTarget.value[target] = job.id
+      currentJobId.value = job.id
+      testJob.value = job
+
+      ElMessage.success('测试任务已创建，正在执行...')
+
+      // 连接WebSocket接收实时进度
+      connectWebSocket(job.id, target)
+
+      // 轮询任务状态
+      pollJobStatus(job.id, target)
+    }
   } catch (error: unknown) {
     const err = error as { response?: { data?: { detail?: string } } }
     ElMessage.error(err.response?.data?.detail || '创建测试任务失败')
@@ -433,17 +566,18 @@ const handleStartTest = async () => {
 }
 
 // 连接WebSocket
-const connectWebSocket = (jobId: number) => {
+const connectWebSocket = (jobId: number, target: 'RUL' | 'PCL') => {
   try {
-    ws = connectTestWebSocket(jobId)
+    const ws = connectTestWebSocket(jobId)
+    wsMap[target] = ws
 
     ws.onopen = () => {
-      console.log('WebSocket connected')
+      console.log('WebSocket connected', target)
     }
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data)
-      handleWebSocketMessage(data)
+      handleWebSocketMessage(data, target)
     }
 
     ws.onerror = (error) => {
@@ -451,7 +585,7 @@ const connectWebSocket = (jobId: number) => {
     }
 
     ws.onclose = () => {
-      console.log('WebSocket closed')
+      console.log('WebSocket closed', target)
     }
   } catch (error) {
     console.error('Failed to connect WebSocket:', error)
@@ -459,7 +593,7 @@ const connectWebSocket = (jobId: number) => {
 }
 
 // 处理WebSocket消息
-const handleWebSocketMessage = (data: Record<string, unknown>) => {
+const handleWebSocketMessage = (data: Record<string, unknown>, target: 'RUL' | 'PCL') => {
   console.log('收到WebSocket消息:', data)
 
   const messageType = typeof data.type === 'string' ? data.type : ''
@@ -470,7 +604,7 @@ const handleWebSocketMessage = (data: Record<string, unknown>) => {
     const level = payload.level ?? data.level
     const message = payload.message ?? data.message
     if (level && message) {
-      testLogs.value.push(`[${level}] ${message}`)
+      testLogs.value.push(`[${target}][${level}] ${message}`)
     }
   } else if (messageType === 'progress') {
     const rawProgress = payload.progress ?? data.progress
@@ -479,14 +613,15 @@ const handleWebSocketMessage = (data: Record<string, unknown>) => {
       Number.isFinite(progressValue) && progressValue <= 1 ? progressValue * 100 : progressValue
     const clamped = Number.isFinite(normalized) ? Math.min(100, Math.max(0, normalized)) : 0
     console.log('更新进度:', clamped)
-    testProgress.value = clamped
+    jobProgressByTarget.value[target] = clamped
+    updateCombinedProgress()
   } else if (messageType === 'status_change' || messageType === 'status') {
     const status = payload.new_status ?? payload.status ?? data.status
     console.log('任务状态变更:', status)
     if (status === 'SUCCEEDED') {
       ElMessage.success('测试完成')
-      const jobId = (payload.test_job_id as number) ?? (data.test_job_id as number) ?? currentJobId.value
-      void finalizeTest(jobId)
+      jobCompletion.value[target] = true
+      void finalizeIfReady()
     } else if (status === 'FAILED') {
       isTesting.value = false
       ElMessage.error('测试失败')
@@ -495,7 +630,7 @@ const handleWebSocketMessage = (data: Record<string, unknown>) => {
 }
 
 // 轮询任务状态
-const pollJobStatus = async (jobId: number) => {
+const pollJobStatus = async (jobId: number, target: 'RUL' | 'PCL') => {
   const maxAttempts = 300 // 最多轮询5分钟
   let attempts = 0
 
@@ -511,7 +646,8 @@ const pollJobStatus = async (jobId: number) => {
       testJob.value = job.job
 
       if (job.job.status === 'SUCCEEDED') {
-        await finalizeTest(jobId)
+        jobCompletion.value[target] = true
+        await finalizeIfReady()
       } else if (job.job.status === 'FAILED') {
         isTesting.value = false
         ElMessage.error('测试失败')
@@ -531,41 +667,96 @@ const pollJobStatus = async (jobId: number) => {
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
-const finalizeTest = async (jobId: number | null | undefined) => {
-  if (!jobId) {
+const fetchTestResults = async (jobId: number) => {
+  const metricsResult = await getTestMetrics(jobId)
+  let predRes = await getTestPredictions(jobId)
+  let attempts = 0
+  while (predRes.predictions.length === 0 && attempts < 2) {
+    await wait(500)
+    predRes = await getTestPredictions(jobId)
+    attempts++
+  }
+  return { metrics: metricsResult, predictions: predRes.predictions }
+}
+
+const mergeMetrics = (metricsList: TestMetrics[]) => {
+  const overallMap = new Map<string, TestMetrics['overall_metrics'][number]>()
+  const batteryMap = new Map<string, TestMetrics['battery_metrics'][number]>()
+
+  metricsList.forEach((entry) => {
+    entry.overall_metrics.forEach((metric) => {
+      overallMap.set(metric.target, metric)
+    })
+    entry.battery_metrics.forEach((metric) => {
+      batteryMap.set(`${metric.battery_id}-${metric.target}`, metric)
+    })
+  })
+
+  return {
+    job_id: metricsList[0]?.job_id ?? 0,
+    overall_metrics: Array.from(overallMap.values()),
+    battery_metrics: Array.from(batteryMap.values()),
+  }
+}
+
+const finalizeIfReady = async () => {
+  if (isFinalizing.value) return
+  if (jobTargets.value.length === 0) return
+  const allDone = jobTargets.value.every((target) => jobCompletion.value[target])
+  if (!allDone) return
+
+  isFinalizing.value = true
+  try {
+    if (jobTargets.value.length === 1) {
+      const target = jobTargets.value[0]
+      const jobId = jobIdsByTarget.value[target]
+      if (jobId) {
+        await finalizeSingle(jobId)
+      }
+    } else {
+      await finalizeMultiple()
+    }
+  } finally {
+    isFinalizing.value = false
+  }
+}
+
+const finalizeSingle = async (jobId: number) => {
+  currentJobId.value = jobId
+  testProgress.value = 100
+  try {
+    await loadTestResultsSingle(jobId)
+  } finally {
+    isTesting.value = false
+  }
+}
+
+const finalizeMultiple = async () => {
+  const jobIds = jobTargets.value
+    .map((target) => jobIdsByTarget.value[target])
+    .filter((jobId): jobId is number => Number.isFinite(jobId))
+  if (jobIds.length === 0) {
     isTesting.value = false
     return
   }
 
-  currentJobId.value = jobId
+  currentJobId.value = null
   testProgress.value = 100
   try {
-    await loadTestResults(jobId)
+    await loadTestResultsMultiple(jobIds)
   } finally {
     isTesting.value = false
   }
 }
 
 // 加载测试结果
-const loadTestResults = async (jobId?: number) => {
-  const resolvedJobId = jobId ?? currentJobId.value
-  if (!resolvedJobId) return
-
+const loadTestResultsSingle = async (jobId: number) => {
   try {
-    // 加载指标
-    metrics.value = await getTestMetrics(resolvedJobId)
-    console.log('测试结果指标:', metrics.value?.overall_metrics)
+    const result = await fetchTestResults(jobId)
+    metrics.value = result.metrics
+    predictions.value = result.predictions
 
-    // 加载预测结果
-    let predRes = await getTestPredictions(resolvedJobId)
-    let attempts = 0
-    while (predRes.predictions.length === 0 && attempts < 2) {
-      await wait(500)
-      predRes = await getTestPredictions(resolvedJobId)
-      attempts++
-    }
-    predictions.value = predRes.predictions
-    const targetCounts = predRes.predictions.reduce(
+    const targetCounts = result.predictions.reduce(
       (acc, pred) => {
         const key = pred.target
         acc[key] = (acc[key] ?? 0) + 1
@@ -574,14 +765,43 @@ const loadTestResults = async (jobId?: number) => {
       {} as Record<string, number>,
     )
     console.log('测试结果预测数量:', {
-      total: predRes.predictions.length,
+      total: result.predictions.length,
       targets: targetCounts,
-      sample: predRes.predictions[0],
+      sample: result.predictions[0],
     })
 
     hasResult.value = true
 
     // 渲染图表
+    await nextTick()
+    renderCharts()
+  } catch {
+    ElMessage.error('加载测试结果失败')
+  }
+}
+
+const loadTestResultsMultiple = async (jobIds: number[]) => {
+  try {
+    const results = await Promise.all(jobIds.map((jobId) => fetchTestResults(jobId)))
+    metrics.value = mergeMetrics(results.map((result) => result.metrics))
+    predictions.value = results.flatMap((result) => result.predictions)
+
+    const targetCounts = predictions.value.reduce(
+      (acc, pred) => {
+        const key = pred.target
+        acc[key] = (acc[key] ?? 0) + 1
+        return acc
+      },
+      {} as Record<string, number>,
+    )
+    console.log('测试结果预测数量:', {
+      total: predictions.value.length,
+      targets: targetCounts,
+      sample: predictions.value[0],
+    })
+
+    hasResult.value = true
+
     await nextTick()
     renderCharts()
   } catch {
@@ -601,31 +821,33 @@ const renderCharts = () => {
       return
     }
 
-    const isRulTarget = testForm.value.target === 'RUL' || testForm.value.target === 'BOTH'
-    const isPclTarget = testForm.value.target === 'PCL' || testForm.value.target === 'BOTH'
+    // 根据实际预测数据判断需要渲染哪些图表
+    const hasRulData = predictions.value.some((p) => p.target === 'RUL')
+    const hasPclData = predictions.value.some((p) => p.target === 'PCL')
+
     const rulReady =
       !!rulChartRef.value && rulChartRef.value.clientWidth > 0 && rulChartRef.value.clientHeight > 0
     const pclReady =
       !!pclChartRef.value && pclChartRef.value.clientWidth > 0 && pclChartRef.value.clientHeight > 0
 
-    if (isRulTarget && !rulReady) {
+    if (hasRulData && !rulReady) {
       console.warn('RUL图表容器未准备好，重试中...', retryCount + 1)
       retryCount++
       setTimeout(tryRender, 200)
       return
     }
 
-    if (isPclTarget && !pclReady) {
+    if (hasPclData && !pclReady) {
       console.warn('PCL图表容器未准备好，重试中...', retryCount + 1)
       retryCount++
       setTimeout(tryRender, 200)
       return
     }
 
-    if (isRulTarget) {
+    if (hasRulData) {
       renderRULChart()
     }
-    if (isPclTarget) {
+    if (hasPclData) {
       renderPCLChart()
     }
 
@@ -771,10 +993,16 @@ const renderPCLChart = () => {
 
 // 导出结果
 const handleExport = async (format: 'CSV' | 'XLSX') => {
-  if (!currentJobId.value) return
+  const jobIds = jobTargets.value
+    .map((target) => jobIdsByTarget.value[target])
+    .filter((jobId): jobId is number => Number.isFinite(jobId))
+
+  if (jobIds.length === 0) return
 
   try {
-    await exportTestResults(currentJobId.value, format)
+    for (const jobId of jobIds) {
+      await exportTestResults(jobId, format)
+    }
     ElMessage.success(`${format}文件下载成功`)
   } catch {
     ElMessage.error('导出失败')
@@ -826,9 +1054,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (ws) {
-    ws.close()
-  }
+  closeWebSockets()
   if (rulChart) {
     rulChart.dispose()
     rulChart = null
@@ -864,6 +1090,37 @@ watch(
     void openJobFromRoute()
   },
 )
+
+watch(
+  () => testForm.value.modelVersionId,
+  () => {
+    if (testForm.value.target === 'BOTH') {
+      return
+    }
+    if (selectedModelTarget.value) {
+      testForm.value.target = selectedModelTarget.value
+    }
+  },
+)
+
+watch(
+  () => testForm.value.target,
+  (target) => {
+    if (target === 'BOTH') {
+      const model = modelVersions.value.find((m) => m.id === testForm.value.modelVersionId)
+      const modelTarget = model?.target === 'BOTH' ? 'PCL' : model?.target
+      if (modelTarget === 'RUL') {
+        testForm.value.modelVersionIdRul = model?.id
+      } else if (modelTarget === 'PCL') {
+        testForm.value.modelVersionIdPcl = model?.id
+      }
+    } else if (target === 'RUL' && testForm.value.modelVersionIdRul) {
+      testForm.value.modelVersionId = testForm.value.modelVersionIdRul
+    } else if (target === 'PCL' && testForm.value.modelVersionIdPcl) {
+      testForm.value.modelVersionId = testForm.value.modelVersionIdPcl
+    }
+  },
+)
 </script>
 
 <template>
@@ -897,7 +1154,7 @@ watch(
                 </el-form-item>
               </el-col>
               <el-col :span="12">
-                <el-form-item label="预测模型">
+                <el-form-item v-if="testForm.target !== 'BOTH'" label="预测模型">
                   <el-select
                     v-model="testForm.modelVersionId"
                     placeholder="选择模型版本"
@@ -912,7 +1169,42 @@ watch(
                     />
                   </el-select>
                 </el-form-item>
+                <el-form-item v-else label="RUL 模型">
+                  <el-select
+                    v-model="testForm.modelVersionIdRul"
+                    placeholder="选择 RUL 模型版本"
+                    filterable
+                    style="width: 100%"
+                  >
+                    <el-option
+                      v-for="item in rulModelOptions"
+                      :key="item.value"
+                      :label="item.label"
+                      :value="item.value"
+                    />
+                  </el-select>
+                </el-form-item>
               </el-col>
+            </el-row>
+            <el-row v-if="testForm.target === 'BOTH'" :gutter="20">
+              <el-col :span="12">
+                <el-form-item label="PCL 模型">
+                  <el-select
+                    v-model="testForm.modelVersionIdPcl"
+                    placeholder="选择 PCL 模型版本"
+                    filterable
+                    style="width: 100%"
+                  >
+                    <el-option
+                      v-for="item in pclModelOptions"
+                      :key="item.value"
+                      :label="item.label"
+                      :value="item.value"
+                    />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12"></el-col>
             </el-row>
 
             <el-form-item label="待测试电池">
@@ -936,8 +1228,26 @@ watch(
               <el-col :span="12">
                 <el-form-item label="预测目标">
                   <el-radio-group v-model="testForm.target">
-                    <el-radio label="RUL">RUL</el-radio>
-                    <el-radio label="PCL">PCL</el-radio>
+                    <el-radio
+                      label="RUL"
+                      :disabled="
+                        testForm.target !== 'BOTH' &&
+                        !!selectedModelTarget &&
+                        selectedModelTarget !== 'RUL'
+                      "
+                    >
+                      RUL
+                    </el-radio>
+                    <el-radio
+                      label="PCL"
+                      :disabled="
+                        testForm.target !== 'BOTH' &&
+                        !!selectedModelTarget &&
+                        selectedModelTarget !== 'PCL'
+                      "
+                    >
+                      PCL
+                    </el-radio>
                     <el-radio label="BOTH">RUL+PCL</el-radio>
                   </el-radio-group>
                 </el-form-item>

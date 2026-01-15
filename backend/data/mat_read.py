@@ -11,7 +11,7 @@ MAT_FILE = "SeversonBattery.mat"  # 替换为你的文件名
 
 
 # 读取.mat文件
-mat_data = sio.loadmat("你的电池数据文件.mat")  # 替换为实际文件路径
+mat_data = sio.loadmat(MAT_FILE)  # 替换为实际文件路径
 
 # 1. 查看.mat文件中的所有变量（找到特征对应的原始变量名）
 print("=== .mat文件中的变量列表 ===")

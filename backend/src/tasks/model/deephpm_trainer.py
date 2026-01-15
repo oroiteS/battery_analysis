@@ -4,6 +4,7 @@ DeepHPM 算法训练执行器
 支持从数据库加载数据，接受外部参数，并提供训练进度回调
 """
 
+import math
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
@@ -30,6 +31,7 @@ class DeepHPMTrainingConfig:
     # 数据参数
     seq_len: int = 1
     perc_val: float = 0.2
+    target: str = "PCL"  # RUL/PCL/BOTH
 
     # 模型参数（来自预训练模型）
     num_layers: list[int] = None  # type: ignore
@@ -79,6 +81,7 @@ class DeepHPMTrainingConfig:
         return {
             "seq_len": self.seq_len,
             "perc_val": self.perc_val,
+            "target": self.target,
             "num_layers": self.num_layers,
             "num_neurons": self.num_neurons,
             "dropout_rate": self.dropout_rate,
@@ -161,9 +164,16 @@ def train_deephpm_from_database(
     inputs_val = inputs_dict["val"].to(device)
     inputs_test = inputs_dict["test"].to(device)
 
-    targets_train = targets_dict["train"][:, :, 0:1].to(device)
-    targets_val = targets_dict["val"][:, :, 0:1].to(device)
-    targets_test = targets_dict["test"][:, :, 0:1].to(device)
+    # 根据 target 选择正确的标签列
+    # targets shape: (N, seq_len, 2), 其中 [:, :, 0] 是 PCL, [:, :, 1] 是 RUL
+    if config.target == "RUL":
+        target_idx = 1
+    else:  # PCL or BOTH (BOTH时只训练PCL，测试时分别处理)
+        target_idx = 0
+
+    targets_train = targets_dict["train"][:, :, target_idx : target_idx + 1].to(device)
+    targets_val = targets_dict["val"][:, :, target_idx : target_idx + 1].to(device)
+    targets_test = targets_dict["test"][:, :, target_idx : target_idx + 1].to(device)
 
     _log(
         "INFO",
@@ -179,6 +189,7 @@ def train_deephpm_from_database(
 
     best_model = None
     best_results = {}
+    best_scalers: dict[str, Any] | None = None
     best_rmspe = float("inf")
 
     for l_idx, num_l in enumerate(config.num_layers):
@@ -291,16 +302,26 @@ def train_deephpm_from_database(
             def eval_metrics(x: torch.Tensor, y: torch.Tensor) -> dict[str, float]:
                 with torch.no_grad():
                     U_pred, _, _ = model(inputs=x)
-                    pred_soh = 1.0 - U_pred
-                    y_soh = 1.0 - y
+                    if config.target == "RUL":
+                        y_eval = y
+                        pred_eval = U_pred
+                    else:
+                        y_eval = 1.0 - y
+                        pred_eval = 1.0 - U_pred
 
-                    rmspe = torch.sqrt(
-                        torch.mean(((pred_soh - y_soh) / y_soh) ** 2)
-                    ).item()
-                    mse = torch.mean((pred_soh - y_soh) ** 2).item()
+                    mask = y_eval != 0
+                    if torch.any(mask):
+                        rmspe = torch.sqrt(
+                            torch.mean(
+                                ((pred_eval[mask] - y_eval[mask]) / y_eval[mask]) ** 2
+                            )
+                        ).item()
+                    else:
+                        rmspe = float("inf")
 
-                    ss_res = torch.sum((pred_soh - y_soh) ** 2)
-                    ss_tot = torch.sum((y_soh - torch.mean(y_soh)) ** 2)
+                    mse = torch.mean((pred_eval - y_eval) ** 2).item()
+                    ss_res = torch.sum((pred_eval - y_eval) ** 2)
+                    ss_tot = torch.sum((y_eval - torch.mean(y_eval)) ** 2)
                     r2 = (1 - ss_res / ss_tot).item()
 
                     return {"RMSPE": rmspe, "MSE": mse, "R2": r2}
@@ -314,14 +335,34 @@ def train_deephpm_from_database(
             metric_mean["test"][l_idx, n_idx] = metrics_test["RMSPE"]
 
             # 保存最佳模型
-            if metrics_val["RMSPE"] < best_rmspe:
-                best_rmspe = metrics_val["RMSPE"]
+            rmspe_val = float(metrics_val["RMSPE"])
+            scalers = {
+                "inputs_dim": int(inputs_train.shape[2]),
+                "outputs_dim": 1,
+                "scaler_inputs": (mean_inputs_train, std_inputs_train),
+                "scaler_targets": (mean_targets_train, std_targets_train),
+            }
+            if best_model is None:
                 best_model = model
                 best_results = {
                     "train": metrics_train,
                     "val": metrics_val,
                     "test": metrics_test,
                 }
+                best_scalers = scalers
+                if math.isfinite(rmspe_val):
+                    best_rmspe = rmspe_val
+            elif math.isfinite(rmspe_val) and rmspe_val < best_rmspe:
+                best_rmspe = rmspe_val
+                best_model = model
+                best_results = {
+                    "train": metrics_train,
+                    "val": metrics_val,
+                    "test": metrics_test,
+                }
+                best_scalers = scalers
+            elif not math.isfinite(rmspe_val):
+                _log("WARNING", "RMSPE 非有限值，跳过最佳模型更新")
 
             if callbacks.on_hyperparameter_search:
                 callbacks.on_hyperparameter_search(
@@ -334,11 +375,29 @@ def train_deephpm_from_database(
             )
 
     # 3. 返回结果
+    scaler_payload = {}
+    if best_scalers:
+        mean_inputs, std_inputs = best_scalers["scaler_inputs"]
+        mean_targets, std_targets = best_scalers["scaler_targets"]
+        scaler_payload = {
+            "inputs_dim": int(best_scalers["inputs_dim"]),
+            "outputs_dim": int(best_scalers["outputs_dim"]),
+            "scaler_inputs": [
+                mean_inputs.detach().cpu().tolist(),
+                std_inputs.detach().cpu().tolist(),
+            ],
+            "scaler_targets": [
+                mean_targets.detach().cpu().tolist(),
+                std_targets.detach().cpu().tolist(),
+            ],
+        }
+
     results = {
         "config": config.to_dict(),
         "metric_mean": metric_mean,
         "best_model_state": best_model.state_dict() if best_model else None,
         "best_results": best_results,
+        **scaler_payload,
     }
 
     if callbacks.on_training_end:

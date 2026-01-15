@@ -12,7 +12,7 @@ from typing import Annotated, Any, Dict, Optional, cast
 
 from fastapi import (
     APIRouter,
-    Depends,
+    Depends,        
     HTTPException,
     Query,
     WebSocket,
@@ -179,6 +179,20 @@ async def create_test_job(
             status_code=status.HTTP_404_NOT_FOUND, detail="模型版本不存在或无权访问"
         )
 
+    # 训练模型仅支持单目标预测，BOTH 按 PCL 处理
+    model_target = str(model_version.target)
+    if model_target == "BOTH":
+        model_target = "PCL"
+
+    effective_target = request.target
+    if request.target == "BOTH":
+        effective_target = model_target
+    elif request.target != model_target:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"模型训练目标为 {model_target}，无法预测 {request.target}。",
+        )
+
     # 2. 验证数据集访问权限
     from src.models import Dataset
 
@@ -216,7 +230,7 @@ async def create_test_job(
         user_id=current_user.id,
         model_version_id=request.model_version_id,
         dataset_id=request.dataset_id,
-        target=request.target,
+        target=effective_target,
         horizon=request.horizon,
         status="PENDING",
         created_at=get_local_now(),

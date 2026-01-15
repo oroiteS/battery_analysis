@@ -58,6 +58,17 @@ def _normalize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _normalize_target(value: Any, default: str = "PCL") -> str:
+    if value is None:
+        return default
+    if hasattr(value, "value"):
+        value = value.value
+    value_str = str(value).upper()
+    if value_str in {"RUL", "PCL", "BOTH"}:
+        return value_str
+    return default
+
+
 class TrainingWorker:
     """训练Worker"""
 
@@ -468,9 +479,11 @@ class TrainingWorker:
             checkpoint_path,
         )
 
-        # 获取训练目标
-        job_target = cast(str | None, self.job.target)
-        target = job_target if job_target is not None else "PCL"
+        # 获取训练目标（当前模型仅支持单目标）
+        target = _normalize_target(self.job.target)
+        if target == "BOTH":
+            self._log("WARNING", "训练目标为 BOTH，当前仅支持单目标训练，已降级为 PCL")
+            target = "PCL"
 
         model_version = ModelVersion(
             user_id=self.job.user_id,
@@ -515,6 +528,7 @@ class TrainingWorker:
             self._update_job_status("RUNNING", progress=0.0)
             self._log("INFO", f"开始执行训练任务 #{self.job_id}")
             self._log("INFO", f"日志文件: {self._log_file_path}")
+            self._log("INFO", f"任务目标: {_normalize_target(self.job.target)}")
 
             runs = (
                 db.query(TrainingJobRun)
@@ -694,9 +708,14 @@ class TrainingWorker:
         hyperparams: dict[str, Any] = (
             job_hyperparams if job_hyperparams is not None else {}
         )  # type: ignore[assignment]
+        job_target = _normalize_target(self.job.target)
+        if job_target == "BOTH":
+            self._log("WARNING", "训练目标为 BOTH，当前仅支持单目标训练，已降级为 PCL")
+            job_target = "PCL"
         config = BaselineTrainingConfig(
             seq_len=hyperparams.get("seq_len", 1),
             perc_val=hyperparams.get("perc_val", 0.2),
+            target=job_target,
             num_layers=hyperparams.get("num_layers", [2]),
             num_neurons=hyperparams.get("num_neurons", [128]),
             num_epoch=hyperparams.get("num_epoch", 2000),
@@ -814,11 +833,15 @@ class TrainingWorker:
 
         best_model_state = results.get("best_model_state")
         if best_model_state:
+            config_payload = config.to_dict()
+            for key in ("inputs_dim", "outputs_dim", "scaler_inputs", "scaler_targets"):
+                if key in results:
+                    config_payload[key] = results[key]
             self._save_model_version(
                 algorithm="BASELINE",
                 model_state=best_model_state,
                 metrics=results.get("best_results", {}) or {},
-                config=config.to_dict(),
+                config=config_payload,
             )
 
     def _train_bilstm(
@@ -832,6 +855,10 @@ class TrainingWorker:
         hyperparams: dict[str, Any] = (
             job_hyperparams if job_hyperparams is not None else {}
         )  # type: ignore[assignment]
+        job_target = _normalize_target(self.job.target)
+        if job_target == "BOTH":
+            self._log("WARNING", "训练目标为 BOTH，当前仅支持单目标训练，已降级为 PCL")
+            job_target = "PCL"
 
         # BiLSTM 使用单个整数作为层数和隐藏维度
         num_layers_list = hyperparams.get("num_layers", [2, 3])
@@ -840,6 +867,7 @@ class TrainingWorker:
         config = BiLSTMTrainingConfig(
             seq_len=hyperparams.get("seq_len", 1),
             perc_val=hyperparams.get("perc_val", 0.2),
+            target=job_target,
             num_layers=num_layers_list[0] if num_layers_list else 2,
             hidden_dim=num_neurons_list[0] if num_neurons_list else 100,
             num_epoch=hyperparams.get("num_epoch", 500),
@@ -968,6 +996,10 @@ class TrainingWorker:
         hyperparams: dict[str, Any] = (
             job_hyperparams if job_hyperparams is not None else {}
         )  # type: ignore[assignment]
+        job_target = _normalize_target(self.job.target)
+        if job_target == "BOTH":
+            self._log("WARNING", "训练目标为 BOTH，当前仅支持单目标训练，已降级为 PCL")
+            job_target = "PCL"
 
         loss_weights_value = hyperparams.get("loss_weights", (1.0, 1.0, 1.0))
         loss_weights: tuple[float, float, float]
@@ -986,6 +1018,7 @@ class TrainingWorker:
         config = DeepHPMTrainingConfig(
             seq_len=hyperparams.get("seq_len", 1),
             perc_val=hyperparams.get("perc_val", 0.2),
+            target=job_target,
             num_layers=hyperparams.get("num_layers", [2]),
             num_neurons=hyperparams.get("num_neurons", [128]),
             num_epoch=hyperparams.get("num_epoch", 2000),
@@ -1122,11 +1155,15 @@ class TrainingWorker:
 
         best_model_state = results.get("best_model_state")
         if best_model_state:
+            config_payload = config.to_dict()
+            for key in ("inputs_dim", "outputs_dim", "scaler_inputs", "scaler_targets"):
+                if key in results:
+                    config_payload[key] = results[key]
             self._save_model_version(
                 algorithm="DEEPHPM",
                 model_state=best_model_state,
                 metrics=results.get("best_results", {}) or {},
-                config=config.to_dict(),
+                config=config_payload,
             )
 
 

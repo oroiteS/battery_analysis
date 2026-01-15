@@ -134,25 +134,28 @@ const isLogScale = ref(true) // 默认开启对数坐标，避免Loss差异过�
 const selectedRunId = ref<number | null>(null) // 当前选中的算法run ID
 
 // --- WebSocket ---
-const ws = ref<WebSocket | null>(null)
-const wsJobId = ref<number | null>(null)
+const wsMap = new Map<number, WebSocket>()
 const route = useRoute()
 const lastOpenedJobId = ref<number | null>(null)
 
 const connectWebSocket = (jobId: number) => {
-  if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-    ws.value.close()
+  const existing = wsMap.get(jobId)
+  if (existing) {
+    if (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING) {
+      return
+    }
+    wsMap.delete(jobId)
   }
 
   const wsUrl = getTrainingWebSocketUrl(jobId)
-  ws.value = new WebSocket(wsUrl)
-  wsJobId.value = jobId
+  const ws = new WebSocket(wsUrl)
+  wsMap.set(jobId, ws)
 
-  ws.value.onopen = () => {
+  ws.onopen = () => {
     console.log(`WebSocket connected for job ${jobId}`)
   }
 
-  ws.value.onmessage = (event) => {
+  ws.onmessage = (event) => {
     const message = JSON.parse(event.data)
 
     // Update list view
@@ -175,6 +178,9 @@ const connectWebSocket = (jobId: number) => {
           // 任务完成时强制进度为1.0 (表示100%)
           progress: newStatus === 'SUCCEEDED' || newStatus === 'FAILED' ? 1.0 : job.progress,
         }
+        if (newStatus === 'SUCCEEDED' || newStatus === 'FAILED') {
+          ws.close()
+        }
       }
     }
 
@@ -184,17 +190,30 @@ const connectWebSocket = (jobId: number) => {
     }
   }
 
-  ws.value.onerror = (error) => {
+  ws.onerror = (error) => {
     console.error(`WebSocket error for job ${jobId}:`, error)
     ElMessage.error('WebSocket连接错误')
   }
 
-  ws.value.onclose = () => {
+  ws.onclose = () => {
     console.log(`WebSocket disconnected for job ${jobId}`)
-    if (wsJobId.value === jobId) {
-      ws.value = null
-      wsJobId.value = null
+    wsMap.delete(jobId)
+  }
+}
+
+const connectRunningJobs = (jobs: TrainingJobResponse[]) => {
+  jobs.forEach((job) => {
+    if (job.status === 'RUNNING') {
+      connectWebSocket(job.id)
     }
+  })
+}
+
+const closeWebSocket = (jobId: number) => {
+  const ws = wsMap.get(jobId)
+  if (ws) {
+    ws.close()
+    wsMap.delete(jobId)
   }
 }
 
@@ -344,14 +363,12 @@ const initData = async () => {
       await handleDatasetChange()
     }
 
-    // Connect to the first running job if any
-    const runningJob = trainingJobs.value.find((j) => j.status === 'RUNNING')
-    if (runningJob) {
-      connectWebSocket(runningJob.id)
-    }
+    // Connect to all running jobs
+    connectRunningJobs(trainingJobs.value)
   } catch (error) {
     console.error('Init failed:', error)
-    ElMessage.error(error?.response?.data?.detail || '初始化失败')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ElMessage.error((error as any)?.response?.data?.detail || '初始化失败')
   }
 }
 
@@ -363,7 +380,8 @@ const handleDatasetChange = async () => {
     updateBatteryRoles()
   } catch (error) {
     console.error('Fetch batteries failed:', error)
-    ElMessage.error(error?.response?.data?.detail || '获取电池列表失败')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ElMessage.error((error as any)?.response?.data?.detail || '获取电池列表失败')
   }
 }
 
@@ -456,9 +474,11 @@ const handleSubmit = async () => {
     activeTab.value = 'monitor'
 
     connectWebSocket(newJob.id)
+    connectRunningJobs(trainingJobs.value)
   } catch (error) {
     console.error('Create job failed:', error)
-    ElMessage.error(error?.response?.data?.detail || '创建任务失败')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ElMessage.error((error as any)?.response?.data?.detail || '创建任务失败')
   } finally {
     isSubmitting.value = false
   }
@@ -477,7 +497,7 @@ const showDetail = async (jobId: number) => {
     }
 
     // If job is running, ensure WS is connected
-    if (res.job.status === 'RUNNING' && wsJobId.value !== jobId) {
+    if (res.job.status === 'RUNNING') {
       connectWebSocket(jobId)
     }
 
@@ -492,7 +512,8 @@ const showDetail = async (jobId: number) => {
     await loadHistoricalLogs(jobId, res.runs)
   } catch (error) {
     console.error('Get job detail failed:', error)
-    ElMessage.error(error?.response?.data?.detail || '获取任务详情失败')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ElMessage.error((error as any)?.response?.data?.detail || '获取任务详情失败')
   }
 }
 
@@ -555,10 +576,9 @@ const loadHistoricalMetrics = async (jobId: number, runs: TrainingRunResponse[])
 const loadHistoricalLogs = async (jobId: number, runs: TrainingRunResponse[]) => {
   // 按运行顺序加载日志（按创建时间排序）
   const sortedRuns = [...runs].sort((a, b) => {
-    return (
-      new Date(a.started_at || a.created_at).getTime() -
-      new Date(b.started_at || b.created_at).getTime()
-    )
+    const timeA = a.started_at ? new Date(a.started_at).getTime() : 0
+    const timeB = b.started_at ? new Date(b.started_at).getTime() : 0
+    return timeA - timeB || a.id - b.id
   })
 
   for (const run of sortedRuns) {
@@ -609,11 +629,7 @@ const handleDelete = async (jobId: number) => {
     trainingJobs.value = trainingJobs.value.filter((j) => j.id !== jobId)
 
     // Close WebSocket if connected to this job
-    if (wsJobId.value === jobId && ws.value) {
-      ws.value.close()
-      ws.value = null
-      wsJobId.value = null
-    }
+    closeWebSocket(jobId)
   } catch (err) {
     // If user clicks cancel, error will be 'cancel'
     if (err !== 'cancel') {
@@ -699,7 +715,7 @@ const initChart = () => {
       },
       formatter: (arg: unknown) => {
         const params = arg as { value: number[]; marker: string; seriesName: string }[]
-        if (!params || params.length === 0) return ''
+        if (!params || params.length === 0 || !params[0]?.value) return ''
         let result = `Epoch ${params[0].value[0]}<br/>`
         params.forEach((param) => {
           if (param.value && param.value[1] !== undefined) {
@@ -883,9 +899,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', resizeChart)
-  if (ws.value) {
-    ws.value.close()
-  }
+  wsMap.forEach((socket) => socket.close())
+  wsMap.clear()
   if (chartInstance.value) {
     chartInstance.value.dispose()
   }

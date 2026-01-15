@@ -123,7 +123,7 @@ const handleSearch = async () => {
         const binCount = 10
         const step = (max - min) / binCount
 
-        const bins = Array.from({ length: binCount }).fill(0)
+        const bins: number[] = Array.from({ length: binCount }).fill(0) as number[]
         const categories: string[] = []
 
         for (let i = 0; i < binCount; i++) {
@@ -133,8 +133,10 @@ const handleSearch = async () => {
         }
 
         values.forEach((v) => {
-          const index = Math.min(Math.floor((v - min) / step), binCount - 1)
-          bins[index]++
+          const index = Math.max(0, Math.min(Math.floor((v - min) / step), binCount - 1))
+          if (bins[index] !== undefined) {
+            bins[index]++
+          }
         })
 
         histData.value = bins
